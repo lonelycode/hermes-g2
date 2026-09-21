@@ -23,6 +23,7 @@ import type { Gesture } from '../glasses/input.ts'
 import { fitLine, oneLine, plainify, wrapText } from '../glasses/text.ts'
 import { Feed, type FeedEntry } from './feed.ts'
 import { looksLikeError, summarizeToolCall, summarizeToolResult } from './summaries.ts'
+import { cleanUserRow } from './history.ts'
 
 export type Screen = 'boot' | 'error' | 'menu' | 'chat' | 'approval'
 export type ChatMode = 'idle' | 'listening' | 'transcribing' | 'sending'
@@ -280,8 +281,12 @@ export class Controller {
   private loadHistory(feed: Feed, messages: HermesMessage[]): void {
     for (const m of messages) {
       const content = messageText(m)
-      if (m.role === 'user' && content) feed.add('user', plainify(content))
-      else if (m.role === 'assistant') {
+      if (m.role === 'user') {
+        const row = cleanUserRow(content, m.display_kind)
+        if (!row) continue
+        if (row.steer) feed.add('system', `steer: ${plainify(row.text)}`)
+        else feed.add('user', plainify(row.text))
+      } else if (m.role === 'assistant') {
         for (const call of m.tool_calls ?? []) {
           const name = call.function?.name ?? 'tool'
           feed.add('tool', summarizeToolCall(name, call.function?.arguments), { tool: name, done: true })
