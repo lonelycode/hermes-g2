@@ -1,10 +1,26 @@
 {
   "name": "hermes-g2",
-  "private": true,
+  "private": false,
   "version": "0.1.0",
   "type": "module",
   "description": "Hermes Agent on Even Realities G2 glasses",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lonelycode/hermes-g2.git"
+  },
+  "bin": {
+    "hermes-g2-proxy": "proxy/cli.mjs"
+  },
+  "files": [
+    "proxy/",
+    "shared/*.mjs",
+    "README.md",
+    "LICENSE.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -13,18 +29,17 @@
     "pack": "npm run build && evenhub pack app.json dist -o hermes-g2.ehpk --sdk-ver 0.0.15",
     "simulate": "evenhub-simulator http://localhost:5173",
     "qr": "evenhub qr --url",
-    "proxy": "node proxy/server.mjs",
+    "proxy": "node proxy/cli.mjs run",
     "mock": "node scripts/mock-hermes.mjs",
     "icon": "node scripts/make-icon.mjs",
-    "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts"
-  },
-  "dependencies": {
-    "@evenrealities/even_hub_sdk": "^0.0.15",
-    "@evenrealities/pretext": "^0.1.4"
+    "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
+    "proxy:setup": "node proxy/cli.mjs setup"
   },
   "devDependencies": {
+    "@evenrealities/even_hub_sdk": "^0.0.15",
     "@evenrealities/evenhub-cli": "^0.1.14",
     "@evenrealities/evenhub-simulator": "^0.9.5",
+    "@evenrealities/pretext": "^0.1.4",
     "@types/node": "^22.20.4",
     "typescript": "^5.7.0",
     "vite": "^5.4.0"

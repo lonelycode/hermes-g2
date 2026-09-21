@@ -20,10 +20,14 @@ import { readFile, stat } from 'node:fs/promises'
 import { existsSync, readFileSync } from 'node:fs'
 import { extname, join, normalize, resolve } from 'node:path'
 import { Readable } from 'node:stream'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { homedir } from 'node:os'
 import { transcribeWithProvider } from '../shared/stt-providers.mjs'
 import { openDeepgramLive } from '../shared/stt-live.mjs'
 import { handshake, wrapSocket } from './ws-min.mjs'
+
+export const CONFIG_DIR = resolve(homedir(), '.hermes-g2-proxy')
+export const CONFIG_FILE = resolve(CONFIG_DIR, '.env')
 
 loadDotEnv()
 
@@ -301,17 +305,31 @@ server.on('upgrade', (req, socket) => {
   }
 })
 
-server.listen(PORT, HOST, () => {
+export function start() {
+  server.listen(PORT, HOST, () => {
   console.log(`[proxy] listening on http://${HOST}:${PORT}`)
   console.log(`[proxy] forwarding to ${HERMES_URL}${HERMES_API_KEY ? ` (injecting gateway key upstream; clients must send the ${PROXY_AUTH_KEY.length}-char PROXY_AUTH_KEY)` : ' (passing client keys through)'}`)
   console.log(`[proxy] STT: ${STT.apiKey ? STT.provider + (STT.model ? ` (${STT.model})` : '') : 'not configured'}${PROXY_AUTH_KEY ? ', bearer-protected' : ', OPEN — set PROXY_AUTH_KEY'}${STT.provider === 'deepgram' && STT.apiKey ? ', live relay at ws://.../stt/stream' : ''}`)
   if (SERVE_DIR) console.log(`[proxy] serving static files from ${SERVE_DIR}`)
-})
+  })
+  return server
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) start()
+
+/** Config precedence: HERMES_G2_PROXY_ENV, then the repo .env, cwd .env, then ~/.hermes-g2-proxy/.env. */
+export function envFileCandidates() {
+  const here = fileURLToPath(new URL('.', import.meta.url))
+  const list = []
+  if (process.env.HERMES_G2_PROXY_ENV) list.push(resolve(process.env.HERMES_G2_PROXY_ENV))
+  list.push(resolve(here, '..', '.env'), resolve(process.cwd(), '.env'), CONFIG_FILE)
+  return list
+}
 
 function loadDotEnv() {
-  const here = fileURLToPath(new URL('.', import.meta.url))
-  for (const candidate of [resolve(here, '..', '.env'), resolve(process.cwd(), '.env')]) {
+  for (const candidate of envFileCandidates()) {
     if (!existsSync(candidate)) continue
+    process.env.HERMES_G2_PROXY_LOADED_ENV = candidate
     for (const line of readFileSync(candidate, 'utf8').split('\n')) {
       const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line)
       if (!m || m[1] in process.env) continue

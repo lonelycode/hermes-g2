@@ -64,13 +64,27 @@ scripts/hermes-cors-patch.py  optional: patch the real gateway instead of proxyi
 
 The stock Hermes gateway does **not** put CORS headers on the `GET /v1/runs/{id}/events` stream (its CORS middleware runs after the streaming response has already sent its headers), and it returns `403` to any request carrying an `Origin` header unless `API_SERVER_CORS_ORIGINS` is set. Both break a WebView client. The community `hermes-cors-patch.py` no longer matches upstream because the run handlers moved to `gateway/platforms/api_server_runs.py`, so it silently does nothing.
 
-**Option A — run the proxy on the gateway host (or anywhere on your tailnet):**
+**Option A — install the proxy on the gateway host (or anywhere on your tailnet).** One command on Linux, macOS or Windows; it needs Node 22+ (20 works without live transcription) and nothing else:
 
 ```bash
-cp .env.example .env         # set HERMES_URL, HERMES_API_KEY, STT_PROVIDER, STT_API_KEY
-npm run proxy                # http://0.0.0.0:8643
-curl http://<host>:8643/proxy/health
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/lonelycode/hermes-g2/main/proxy/install.sh | bash
 ```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/lonelycode/hermes-g2/main/proxy/install.ps1 | iex
+```
+
+Both run `npx --package=github:lonelycode/hermes-g2 hermes-g2-proxy setup`, an interactive wizard that finds `API_SERVER_KEY` in `~/.hermes/.env`, checks the gateway and your speech-to-text key, writes `~/.hermes-g2-proxy/.env`, prints the URL to enter on the phone, and offers to start the proxy automatically (systemd user unit on Linux, launchd agent on macOS, hidden scheduled task on Windows). Afterwards:
+
+```bash
+npx hermes-g2-proxy doctor             # re-check gateway, key, STT; print phone URLs
+npx hermes-g2-proxy service status     # also: logs | uninstall | install
+npx hermes-g2-proxy run                # foreground, e.g. for debugging
+```
+
+(Once the package is on npm, `npx hermes-g2 setup` works without the `--package=github:…` spelling.) From a checkout, `npm run proxy:setup` and `npm run proxy` do the same, and a `.env` in the repo root overrides the home config.
 
 The proxy forwards everything else to Hermes untouched (streaming both ways, `Origin` stripped so the gateway's own CORS list is irrelevant), adds CORS to every response including SSE, authenticates the phone with `PROXY_AUTH_KEY` (defaults to `HERMES_API_KEY`) before injecting the real gateway key upstream, and serves `POST /stt/transcribe` plus the `ws://…/stt/stream` live relay so the STT key never lands on the phone. Point the app at `http://<host>:8643`. Set `STT_LIVE_DEBUG=1` to log the raw Deepgram messages.
 
