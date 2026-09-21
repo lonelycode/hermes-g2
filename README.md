@@ -42,6 +42,16 @@ Tool events carry raw JSON previews; the feed reduces each call to the tool name
 
 Approvals use every choice the gateway offers (`once`, `session`, `always`, `deny`; fewer when the gateway flags a command as risky). If the live stream drops, the app falls back to polling `GET /v1/runs/{id}` and still surfaces pending approvals from the run status.
 
+## Screenshots
+
+Captured from the simulator (`store/screenshots/` holds the raw 576×288 frames the store expects; these are composited on black).
+
+| | |
+|---|---|
+| ![Sessions](store/preview/01-sessions.png) | ![Steps under the question](store/preview/02-steps.png) |
+| ![Working](store/preview/03-working.png) | ![Answer](store/preview/04-answer.png) |
+| ![Listening](store/preview/06-listening.png) | ![Approval](store/preview/07-approval.png) |
+
 ## Layout
 
 ```

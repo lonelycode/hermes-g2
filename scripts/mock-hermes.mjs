@@ -31,6 +31,10 @@ function seedSession(id, title, msgs) {
   sessions.set(id, { id, title, source: 'api_server', started_at: now - 3600, last_active: now - 60, message_count: msgs.length, preview: msgs[0]?.content })
   messages.set(id, msgs.map((m, i) => ({ id: i + 1, session_id: id, timestamp: now - 3600 + i * 10, ...m })))
 }
+seedSession('mock_gamma', 'Release notes draft', [
+  { role: 'user', content: 'Draft release notes for 0.2.0' },
+  { role: 'assistant', content: 'Here is a draft:\n\n- Live transcription while you talk\n- Fade page turns\n- Double-tap to interrupt a reply' },
+])
 seedSession('mock_alpha', 'Broadband comparison', [
   { role: 'user', content: 'Compare fibre plans for 859 Whangaparaoa' },
   { role: 'assistant', content: null, tool_calls: [{ id: 'c1', function: { name: 'web_search', arguments: '{"query":"fibre plans whangaparaoa"}' } }] },
@@ -68,6 +72,7 @@ function pushEvent(run, event, fields = {}) {
 async function executeRun(run, input) {
   run.status = 'running'
   const lower = input.toLowerCase()
+  if (lower.includes('demo') || lower.includes('repo today')) return demoRun(run, input)
   await sleep(300)
   pushEvent(run, 'message.interim', { text: 'Let me look into that.', already_streamed: false })
   await sleep(400)
@@ -109,6 +114,43 @@ async function executeRun(run, input) {
   const answer = lower.includes('slow')
     ? `That took a while, but here it is.${run.steer ? `\n\n(You steered me with: "${run.steer}")` : ''}\n\nThe directory has 12 entries. The only document is **notes.md** from August.`
     : `You said: "${input}"\n\nThe directory has **12 entries**. The only document is notes.md (1.4 KB, Aug 25).\n\n1. Nothing needs attention\n2. Ask me to open a file if you want details`
+  for (const word of answer.split(/(?<=\s)/)) {
+    if (run.stopped) return finish(run, 'cancelled')
+    pushEvent(run, 'message.delta', { delta: word })
+    await sleep(35)
+  }
+  return finish(run, 'completed', answer)
+}
+
+// A realistic-looking turn for screenshots: "demo" in the input.
+async function demoRun(run, input) {
+  await sleep(300)
+  pushEvent(run, 'message.interim', { text: 'Checking the repository.', already_streamed: false })
+  await sleep(500)
+  pushEvent(run, 'tool.started', { tool: 'terminal', preview: JSON.stringify({ command: 'git log --since=midnight --oneline' }) })
+  await sleep(900)
+  pushEvent(run, 'tool.completed', { tool: 'terminal', duration: 0.42, error: false, preview: JSON.stringify({ stdout: '3 commits', exit_code: 0 }) })
+  await sleep(300)
+  pushEvent(run, 'tool.started', { tool: 'read_file', preview: JSON.stringify({ path: 'CHANGELOG.md' }) })
+  await sleep(700)
+  pushEvent(run, 'tool.completed', { tool: 'read_file', duration: 0.11, error: false, preview: JSON.stringify({ content: '…' }) })
+  if (input.toLowerCase().includes('approve')) {
+    run.status = 'waiting_for_approval'
+    run.approval = {
+      event: 'approval.request', run_id: run.id, timestamp: Date.now() / 1000,
+      command: 'git push origin main --force-with-lease',
+      description: 'Push the rebased branch to the shared remote',
+      pattern_key: 'git push', request_id: `req_${randomUUID().slice(0, 8)}`,
+      choices: ['once', 'session', 'always', 'deny'], allow_session: true, allow_permanent: true,
+    }
+    pushEvent(run, 'approval.request', run.approval)
+    const decision = await new Promise(resolve => { run.resolveApproval = resolve })
+    run.approval = null
+    run.status = 'running'
+    pushEvent(run, 'approval.responded', { choice: decision })
+  }
+  await sleep(300)
+  const answer = 'Three commits landed today, all on main:\n\n1. Live transcription now streams while you talk.\n2. Tool calls are summarised to one line each.\n3. Page turns fade so the eye can re-anchor.\n\nNothing is waiting for review and the build is green.'
   for (const word of answer.split(/(?<=\s)/)) {
     if (run.stopped) return finish(run, 'cancelled')
     pushEvent(run, 'message.delta', { delta: word })
