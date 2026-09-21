@@ -71,9 +71,13 @@ async function executeRun(run, input) {
   await sleep(300)
   pushEvent(run, 'message.interim', { text: 'Let me look into that.', already_streamed: false })
   await sleep(400)
-  pushEvent(run, 'tool.started', { tool: 'terminal', preview: `ls -la ~/projects | head` })
+  pushEvent(run, 'tool.started', { tool: 'terminal', preview: JSON.stringify({ command: 'ls -la ~/projects | head', timeout: 30, workdir: '/home/martin' }) })
   await sleep(900)
-  pushEvent(run, 'tool.completed', { tool: 'terminal', duration: 0.87, error: false, preview: 'total 48\ndrwxr-xr-x  12 martin staff  384 Sep 21 18:22 .\n-rw-r--r--   1 martin staff 1483 Aug 25 10:22 notes.md' })
+  pushEvent(run, 'tool.completed', { tool: 'terminal', duration: 0.87, error: false, preview: JSON.stringify({ stdout: 'total 48\ndrwxr-xr-x  12 martin staff  384 Sep 21 18:22 .\n-rw-r--r--   1 martin staff 1483 Aug 25 10:22 notes.md', exit_code: 0 }) })
+  await sleep(200)
+  pushEvent(run, 'tool.started', { tool: 'web_search', preview: JSON.stringify({ query: 'even realities g2 sdk text container limits', max_results: 5 }) })
+  await sleep(500)
+  pushEvent(run, 'tool.completed', { tool: 'web_search', duration: 0.48, error: true, preview: JSON.stringify({ error: 'HTTP 429 rate limited by provider' }) })
   if (lower.includes('approve')) {
     run.status = 'waiting_for_approval'
     run.approval = {

@@ -21,6 +21,7 @@ import { APPROVAL_BODY_LINES, BODY_LINES, Glasses, INNER_W, MENU_ITEMS, MENU_OBJ
 import type { Gesture } from '../glasses/input.ts'
 import { fitLine, oneLine, plainify, wrapText } from '../glasses/text.ts'
 import { Feed, type FeedEntry } from './feed.ts'
+import { looksLikeError, summarizeToolCall, summarizeToolResult } from './summaries.ts'
 
 export type Screen = 'boot' | 'error' | 'menu' | 'chat' | 'approval'
 export type ChatMode = 'idle' | 'listening' | 'transcribing' | 'sending'
@@ -275,7 +276,7 @@ export class Controller {
       else if (m.role === 'assistant') {
         for (const call of m.tool_calls ?? []) {
           const name = call.function?.name ?? 'tool'
-          feed.add('tool', `${name} ${oneLine(call.function?.arguments, 80)}`.trim(), { tool: name, done: true })
+          feed.add('tool', summarizeToolCall(name, call.function?.arguments), { tool: name, done: true })
         }
         if (content) feed.add('assistant', plainify(content))
       }
@@ -528,6 +529,7 @@ export class Controller {
 
   private onRunEvent(tracker: RunTracker, ev: RunEvent): void {
     const feed = this.feed(tracker.sessionId)
+    const verbose = this.settings.feedDetail === 'verbose'
     switch (ev.event) {
       case 'message.delta': {
         if (!tracker.assistant) tracker.assistant = feed.add('assistant', '')
@@ -535,28 +537,33 @@ export class Controller {
         break
       }
       case 'message.interim': {
-        if (!ev.already_streamed && ev.text) feed.add('interim', plainify(ev.text))
+        if (!ev.already_streamed && ev.text) feed.add('interim', plainify(verbose ? ev.text : oneLine(ev.text, 200)))
         break
       }
       case 'tool.started': {
         tracker.assistant = undefined
-        tracker.lastActivity = ev.tool
-        feed.add('tool', `${ev.tool} ${oneLine(ev.preview, 110)}`.trim(), { tool: ev.tool })
+        const summary = summarizeToolCall(ev.tool, ev.preview, verbose ? 110 : 64)
+        tracker.lastActivity = summary
+        feed.add('tool', summary, { tool: ev.tool })
         break
       }
       case 'tool.completed': {
         const open = feed.openTool(ev.tool)
         const dur = ev.duration !== undefined ? ` ${Number(ev.duration).toFixed(1)}s` : ''
-        const preview = oneLine(ev.preview, 100)
-        const head = open ? open.text.replace(/^\S+\s?/, `${ev.tool}${dur} `) : `${ev.tool}${dur}`
-        const text = preview ? `${head}\n→ ${preview}` : head
-        if (open) feed.update(open, { text, done: true, failed: !!ev.error })
-        else feed.add('tool', text, { tool: ev.tool, done: true, failed: !!ev.error })
+        const failed = !!ev.error || (!verbose && looksLikeError(ev.preview) && !open)
+        const base = open ? open.text : summarizeToolCall(ev.tool, null)
+        // "tool: args" -> "tool 0.9s: args"; results stay hidden in compact mode unless it failed.
+        const head = base.replace(/^([^\s:]+)(:?)/, `$1${dur}$2`)
+        const result = verbose || ev.error ? summarizeToolResult(ev.preview, verbose ? 90 : 70) : ''
+        const text = result ? `${head}\n→ ${result}` : head
+        if (open) feed.update(open, { text, done: true, failed })
+        else feed.add('tool', text, { tool: ev.tool, done: true, failed })
         tracker.lastActivity = `${ev.tool} done`
         break
       }
       case 'reasoning.available': {
-        // Some providers echo the answer itself here; only show reasoning that adds something.
+        // Compact mode hides reasoning; some providers also echo the answer itself here.
+        if (!verbose) break
         const text = oneLine(ev.text, 160)
         if (text && text !== oneLine(tracker.assistant?.text ?? '', 160)) feed.add('reasoning', text)
         break
@@ -564,11 +571,11 @@ export class Controller {
       case 'subagent.start': {
         tracker.assistant = undefined
         tracker.lastActivity = 'subagent'
-        feed.add('subagent', `subagent: ${oneLine(ev.goal ?? ev.preview, 120)}`)
+        feed.add('subagent', `subagent: ${oneLine(ev.goal ?? ev.preview, verbose ? 120 : 70)}`)
         break
       }
       case 'subagent.complete': {
-        feed.add('subagent', `subagent ${ev.status ?? 'done'}: ${oneLine(ev.summary ?? ev.preview, 140)}`)
+        feed.add('subagent', `subagent ${ev.status ?? 'done'}: ${oneLine(ev.summary ?? ev.preview, verbose ? 140 : 90)}`)
         break
       }
       case 'approval.request': {

@@ -3,6 +3,8 @@
 
 export type SttMode = 'proxy' | 'elevenlabs' | 'openai' | 'deepgram'
 export type MicSource = 'glasses' | 'phone'
+/** compact: tool name + one argument, results only on failure. verbose: previews and reasoning. */
+export type FeedDetail = 'compact' | 'verbose'
 
 export interface Settings {
   hermesUrl: string
@@ -13,6 +15,7 @@ export interface Settings {
   sttModel: string
   sttLanguage: string
   micSource: MicSource
+  feedDetail: FeedDetail
   maxListenSeconds: number
   /** RMS (0..32767) below which a clip counts as silence and is discarded. */
   minAudioRms: number
@@ -31,6 +34,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sttModel: env.VITE_STT_MODEL || '',
   sttLanguage: '',
   micSource: 'glasses',
+  feedDetail: 'compact',
   maxListenSeconds: 60,
   minAudioRms: 200,
 }
@@ -96,6 +100,7 @@ export function normalizeSettings(raw: Partial<Settings> | null | undefined): Se
   s.sttLanguage = s.sttLanguage.trim()
   if (!['proxy', 'elevenlabs', 'openai', 'deepgram'].includes(s.sttMode)) s.sttMode = 'proxy'
   if (!['glasses', 'phone'].includes(s.micSource)) s.micSource = 'glasses'
+  if (!['compact', 'verbose'].includes(s.feedDetail)) s.feedDetail = 'compact'
   s.maxListenSeconds = clamp(Number(s.maxListenSeconds) || 60, 5, 300)
   s.minAudioRms = clamp(Number(s.minAudioRms) || 200, 0, 10000)
   return s

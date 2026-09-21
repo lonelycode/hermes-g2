@@ -24,14 +24,17 @@ The chat feed shows every interstitial step, not just the answer:
 ```
 ▶ what changed in the repo today
 · Let me look into that.
-● terminal 0.9s
-→ total 48  drwxr-xr-x 12 martin …
+● terminal 0.9s: ls -la ~/projects | head
+× web_search 0.5s: even realities g2 sdk
+→ HTTP 429 rate limited by provider
 » subagent: Summarise the directory listing
 » subagent completed: Twelve entries, one markdown note.
 The directory has 12 entries. The only document is notes.md …
 ```
 
 Prefixes: `▶` you · `○/●/×` tool running / done / failed · `·` commentary or system · `»` subagent · `?` approval · `×` error. Only glyphs present in the G2 firmware font are used (see `scripts/check-glyphs.mjs`).
+
+Tool events carry raw JSON previews; the feed reduces each call to the tool name plus its one meaningful argument (command, query, path, url …) and hides results unless the call failed. The **Transcript detail** setting switches to `verbose` (argument and result previews, reasoning summaries) when you want more.
 
 Approvals use every choice the gateway offers (`once`, `session`, `always`, `deny`; fewer when the gateway flags a command as risky). If the live stream drops, the app falls back to polling `GET /v1/runs/{id}` and still surfaces pending approvals from the run status.
 
