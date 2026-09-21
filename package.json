@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Hermes Agent on Even Realities G2 glasses",
+  "license": "AGPL-3.0-only",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

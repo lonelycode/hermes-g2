@@ -132,3 +132,7 @@ Clarifying questions from the agent (the `clarify` tool) have no API-server tran
 npm test          # text wrapping, feed paging, SSE parser, WAV helpers (node:test)
 npm run typecheck
 ```
+
+## License
+
+[GNU AGPL v3](LICENSE.md).
