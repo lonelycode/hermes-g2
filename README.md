@@ -80,9 +80,11 @@ Both run `npx --package=github:lonelycode/hermes-g2 hermes-g2-proxy setup`, an i
 
 ```bash
 npx hermes-g2-proxy doctor             # re-check gateway, key, STT; print phone URLs
-npx hermes-g2-proxy service status     # also: logs | uninstall | install
+npx hermes-g2-proxy service status     # also: logs | uninstall | install | show
 npx hermes-g2-proxy run                # foreground, e.g. for debugging
 ```
+
+`service show` prints the exact systemd unit / launchd plist / scheduled task it would install. `service install` first copies the proxy into `~/.hermes-g2-proxy/app/` and runs it from there (never from the npx cache, which npm prunes); re-run it after upgrading. On Linux without root it installs a user unit and enables login lingering so the proxy also starts at boot; run as root and it becomes a system unit.
 
 (Once the package is on npm, `npx hermes-g2 setup` works without the `--package=github:…` spelling.) From a checkout, `npm run proxy:setup` and `npm run proxy` do the same, and a `.env` in the repo root overrides the home config.
 

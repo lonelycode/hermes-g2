@@ -10,7 +10,7 @@
 // Node 22+ is required for live transcription (WebSocket client); Node 20 works for batch STT.
 
 import { spawnSync, execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs'
 import { homedir, networkInterfaces, platform, userInfo } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { createInterface } from 'node:readline/promises'
@@ -21,6 +21,7 @@ const SERVER = resolve(HERE, 'server.mjs')
 const CONFIG_DIR = resolve(homedir(), '.hermes-g2-proxy')
 const CONFIG_FILE = resolve(CONFIG_DIR, '.env')
 const LOG_FILE = resolve(CONFIG_DIR, 'proxy.log')
+const APP_DIR = resolve(CONFIG_DIR, 'app')
 const SERVICE_NAME = 'hermes-g2-proxy'
 const LAUNCHD_LABEL = 'com.hermesg2.proxy'
 const TASK_NAME = 'Hermes G2 Proxy'
@@ -284,6 +285,26 @@ function nodeBin() {
   return process.execPath
 }
 
+/**
+ * Services must not point into the npx cache (npm prunes it). Copy the proxy and its shared
+ * modules into ~/.hermes-g2-proxy/app and run the service from there. Re-run `service install`
+ * after upgrading to refresh the copy.
+ */
+function stagedServer() {
+  return resolve(APP_DIR, 'proxy', 'server.mjs')
+}
+function stageApp() {
+  const src = resolve(HERE, '..')
+  for (const rel of ['proxy/server.mjs', 'proxy/ws-min.mjs', 'proxy/cli.mjs', 'shared/stt-providers.mjs', 'shared/stt-live.mjs', 'package.json']) {
+    const from = resolve(src, rel)
+    if (!existsSync(from)) throw new Error(`missing ${from}`)
+    const to = resolve(APP_DIR, rel)
+    mkdirSync(dirname(to), { recursive: true })
+    copyFileSync(from, to)
+  }
+  return stagedServer()
+}
+
 function sh(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { stdio: opts.quiet ? 'pipe' : 'inherit', shell: false })
   return r.status === 0
@@ -291,19 +312,38 @@ function sh(cmd, args, opts = {}) {
 
 async function service(action) {
   const os = platform()
-  if (!['install', 'uninstall', 'status', 'logs'].includes(action)) {
-    console.log('usage: hermes-g2-proxy service install|uninstall|status|logs')
+  if (!['install', 'uninstall', 'status', 'logs', 'show'].includes(action)) {
+    console.log('usage: hermes-g2-proxy service install|uninstall|status|logs|show')
     return
   }
   if (action === 'install' && !existsSync(CONFIG_FILE)) {
     console.log(c.bad(`no config at ${CONFIG_FILE}; run setup first`))
     return
   }
-  mkdirSync(CONFIG_DIR, { recursive: true })
-  if (os === 'linux') return serviceLinux(action)
-  if (os === 'darwin') return serviceMac(action)
-  if (os === 'win32') return serviceWindows(action)
+  if (action !== 'show') mkdirSync(CONFIG_DIR, { recursive: true })
+  if (action === 'install') console.log(c.ok(`copied the proxy to ${stageApp() === stagedServer() ? APP_DIR : APP_DIR}`))
+  const target = process.env.HERMES_G2_SERVICE_OS || os // HERMES_G2_SERVICE_OS lets `show` preview another OS
+  if (target === 'linux') return serviceLinux(action)
+  if (target === 'darwin') return serviceMac(action)
+  if (target === 'win32') return serviceWindows(action)
   console.log(c.warn(`no service integration for ${os}; run in the foreground with: npx hermes-g2 run`))
+}
+
+function linuxUnit(root) {
+  return `[Unit]
+Description=Hermes G2 proxy (CORS front door + STT relay for Hermes Agent)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Environment=HERMES_G2_PROXY_ENV=${CONFIG_FILE}
+ExecStart=${nodeBin()} ${stagedServer()}
+Restart=always
+RestartSec=3
+${root ? `User=${userInfo().username}\n` : ''}
+[Install]
+WantedBy=${root ? 'multi-user.target' : 'default.target'}
+`
 }
 
 function serviceLinux(action) {
@@ -311,21 +351,15 @@ function serviceLinux(action) {
   const unitDir = root ? '/etc/systemd/system' : resolve(homedir(), '.config/systemd/user')
   const unit = resolve(unitDir, `${SERVICE_NAME}.service`)
   const ctl = root ? ['systemctl'] : ['systemctl', '--user']
+  if (action === 'show') {
+    console.log(c.dim(`# ${unit}`))
+    console.log(linuxUnit(root))
+    console.log(c.dim(`# then: systemctl ${root ? '' : '--user '}daemon-reload && systemctl ${root ? '' : '--user '}enable --now ${SERVICE_NAME}${root ? '' : '\n#       sudo loginctl enable-linger $USER   (start at boot without a login session)'}`))
+    return
+  }
   if (action === 'install') {
     mkdirSync(unitDir, { recursive: true })
-    writeFileSync(unit, `[Unit]
-Description=Hermes G2 proxy (CORS front door + STT relay for Hermes Agent)
-After=network-online.target
-
-[Service]
-Environment=HERMES_G2_PROXY_ENV=${CONFIG_FILE}
-ExecStart=${nodeBin()} ${SERVER}
-Restart=always
-RestartSec=3
-${root ? `User=${userInfo().username}\n` : ''}
-[Install]
-WantedBy=${root ? 'multi-user.target' : 'default.target'}
-`)
+    writeFileSync(unit, linuxUnit(root))
     sh(ctl[0], [...ctl.slice(1), 'daemon-reload'])
     const ok = sh(ctl[0], [...ctl.slice(1), 'enable', '--now', SERVICE_NAME])
     console.log(ok ? c.ok(`installed and started ${unit}`) : c.bad('systemctl failed; see output above'))
@@ -343,23 +377,33 @@ WantedBy=${root ? 'multi-user.target' : 'default.target'}
   else sh('journalctl', [...(root ? [] : ['--user']), '-u', SERVICE_NAME, '-n', '100', '--no-pager'])
 }
 
-function serviceMac(action) {
-  const plist = resolve(homedir(), 'Library/LaunchAgents', `${LAUNCHD_LABEL}.plist`)
-  const domain = `gui/${process.getuid()}`
-  if (action === 'install') {
-    mkdirSync(dirname(plist), { recursive: true })
-    writeFileSync(plist, `<?xml version="1.0" encoding="UTF-8"?>
+function macPlist() {
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>${LAUNCHD_LABEL}</string>
-  <key>ProgramArguments</key><array><string>${nodeBin()}</string><string>${SERVER}</string></array>
+  <key>ProgramArguments</key><array><string>${nodeBin()}</string><string>${stagedServer()}</string></array>
   <key>EnvironmentVariables</key><dict><key>HERMES_G2_PROXY_ENV</key><string>${CONFIG_FILE}</string></dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>${LOG_FILE}</string>
   <key>StandardErrorPath</key><string>${LOG_FILE}</string>
 </dict></plist>
-`)
+`
+}
+
+function serviceMac(action) {
+  const plist = resolve(homedir(), 'Library/LaunchAgents', `${LAUNCHD_LABEL}.plist`)
+  const domain = `gui/${typeof process.getuid === 'function' ? process.getuid() : 501}`
+  if (action === 'show') {
+    console.log(c.dim(`# ${plist}`))
+    console.log(macPlist())
+    console.log(c.dim(`# then: launchctl bootstrap ${domain} ${plist}`))
+    return
+  }
+  if (action === 'install') {
+    mkdirSync(dirname(plist), { recursive: true })
+    writeFileSync(plist, macPlist())
     sh('launchctl', ['bootout', domain, plist], { quiet: true })
     const ok = sh('launchctl', ['bootstrap', domain, plist])
     console.log(ok ? c.ok(`installed and started ${plist}`) : c.bad('launchctl bootstrap failed; see output above'))
@@ -373,9 +417,15 @@ function serviceMac(action) {
 }
 
 function serviceWindows(action) {
+  if (action === 'show') {
+    console.log(c.dim(`# ${resolve(CONFIG_DIR, 'run-proxy.cmd')} (launched hidden via wscript by the scheduled task "${TASK_NAME}")`))
+    console.log(`@echo off\nset HERMES_G2_PROXY_ENV=${CONFIG_FILE}\n"${nodeBin()}" "${stagedServer()}" >> "${LOG_FILE}" 2>&1`)
+    console.log(c.dim(`# then: schtasks /Create /F /SC ONLOGON /TN "${TASK_NAME}" /TR "wscript.exe <run-proxy-hidden.vbs>" /RL LIMITED`))
+    return
+  }
   if (action === 'install') {
     const launcher = resolve(CONFIG_DIR, 'run-proxy.cmd')
-    writeFileSync(launcher, `@echo off\r\nset HERMES_G2_PROXY_ENV=${CONFIG_FILE}\r\n"${nodeBin()}" "${SERVER}" >> "${LOG_FILE}" 2>&1\r\n`)
+    writeFileSync(launcher, `@echo off\r\nset HERMES_G2_PROXY_ENV=${CONFIG_FILE}\r\n"${nodeBin()}" "${stagedServer()}" >> "${LOG_FILE}" 2>&1\r\n`)
     const vbs = resolve(CONFIG_DIR, 'run-proxy-hidden.vbs')
     writeFileSync(vbs, `CreateObject("Wscript.Shell").Run """${launcher}""", 0, False\r\n`)
     const ok = sh('schtasks', ['/Create', '/F', '/SC', 'ONLOGON', '/TN', TASK_NAME, '/TR', `wscript.exe "${vbs}"`, '/RL', 'LIMITED'])
@@ -397,8 +447,8 @@ function help() {
 
   setup                  interactive wizard (writes ${CONFIG_FILE})
   run                    start the proxy in the foreground
-  service install        start automatically (${serviceKind()})
-  service status|logs|uninstall
+  service install        start automatically (${serviceKind()}); copies the proxy to ${APP_DIR}
+  service status|logs|uninstall|show   (show prints the unit/plist/task without installing)
   doctor                 check gateway, key, STT provider and print the URLs for the phone
 `)
 }
