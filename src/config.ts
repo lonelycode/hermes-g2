@@ -10,7 +10,7 @@ export type ScrollStep = 'page' | 'half'
 /** page: the app redraws a page per swipe. smooth: the glasses scroll a multi-page window natively. */
 export type ScrollMode = 'page' | 'smooth'
 /** Motion cue when a swipe turns the page (page mode). */
-export type PageTransition = 'none' | 'slide' | 'fade' | 'blink'
+export type PageTransition = 'fade' | 'none'
 /** Paced reveal of answers: off = show deltas as they arrive. */
 export type TypingSpeed = 'off' | 'slow' | 'normal' | 'fast'
 
@@ -124,7 +124,7 @@ export function normalizeSettings(raw: Partial<Settings> | null | undefined): Se
   if (!['compact', 'verbose'].includes(s.feedDetail)) s.feedDetail = 'compact'
   if (!['page', 'half'].includes(s.scrollStep)) s.scrollStep = 'page'
   if (!['page', 'smooth'].includes(s.scrollMode)) s.scrollMode = 'page'
-  if (!['none', 'slide', 'fade', 'blink'].includes(s.pageTransition)) s.pageTransition = 'fade'
+  if (!['fade', 'none'].includes(s.pageTransition)) s.pageTransition = 'fade'
   if (!['off', 'slow', 'normal', 'fast'].includes(s.typingSpeed)) s.typingSpeed = 'normal'
   s.maxListenSeconds = clamp(Number(s.maxListenSeconds) || 60, 5, 300)
   s.minAudioRms = clamp(Number(s.minAudioRms) || 200, 0, 10000)

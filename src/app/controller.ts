@@ -427,26 +427,20 @@ export class Controller {
   private turnPage(from: number, to: number): void {
     const feed = this.feed()
     const target = feed.page()
-    const style = this.settings.pageTransition
-    let frames: Array<{ content: string; textColor?: number }>
-    if (style === 'slide' && Math.abs(to - from) >= 3) {
-      const d = to - from
-      frames = [feed.pageAt(from + Math.round(d / 3)), feed.pageAt(from + Math.round((2 * d) / 3)), target].map(content => ({ content }))
-    } else if (style === 'fade') {
+    if (this.settings.pageTransition === 'fade' && to !== from) {
       // Dip the old page, bring the new one in dim, then ramp to full brightness.
-      frames = [
-        { content: feed.pageAt(from), textColor: 1 },
-        { content: target, textColor: 2 },
-        { content: target, textColor: 3 },
-        { content: target, textColor: 4 },
-      ]
-    } else if (style === 'blink') {
-      frames = [{ content: ' ' }, { content: target }]
+      this.glasses.animateBody(
+        [
+          { content: feed.pageAt(from), textColor: 1 },
+          { content: target, textColor: 2 },
+          { content: target, textColor: 3 },
+          { content: target, textColor: 4 },
+        ],
+        130,
+      )
     } else {
-      frames = [{ content: target }]
+      this.glasses.updateBody(target)
     }
-    if (frames.length > 1) this.glasses.animateBody(frames, style === 'fade' ? 130 : style === 'slide' ? 70 : 90)
-    else this.glasses.updateBody(target)
     this.glasses.updateStatus(this.statusLine())
     this.syncSpinner()
     this.emit()

@@ -25,7 +25,7 @@ async function main(): Promise<void> {
     const scroll = q.get('scroll')
     if (scroll === 'smooth' || scroll === 'page') settings = { ...settings, scrollMode: scroll }
     const turn = q.get('turn')
-    if (turn === 'none' || turn === 'slide' || turn === 'fade' || turn === 'blink') settings = { ...settings, pageTransition: turn }
+    if (turn === 'none' || turn === 'fade') settings = { ...settings, pageTransition: turn }
   }
 
   let controller: Controller | null = null
