@@ -65,6 +65,8 @@ export class Feed {
   follow = true
   /** Entry pinned to the top of the page (the latest answer) until the user scrolls. */
   private anchor: FeedEntry | null = null
+  /** Lines moved per swipe; defaults to a page with one line of overlap. */
+  step = 0
   private readonly width: number
   readonly pageLines: number
 
@@ -202,7 +204,7 @@ export class Feed {
     this.lines()
     this.anchor = null
     if (this.offset === 0) return false
-    this.offset = Math.max(0, this.offset - Math.max(1, this.pageLines - 1))
+    this.offset = Math.max(0, this.offset - this.stepLines())
     this.follow = false
     return true
   }
@@ -216,9 +218,13 @@ export class Feed {
       this.follow = true
       return false
     }
-    this.offset = Math.min(max, this.offset + Math.max(1, this.pageLines - 1))
+    this.offset = Math.min(max, this.offset + this.stepLines())
     if (this.offset >= max) this.follow = true
     return true
+  }
+
+  private stepLines(): number {
+    return Math.max(1, this.step || this.pageLines - 1)
   }
 
   jumpToEnd(): void {

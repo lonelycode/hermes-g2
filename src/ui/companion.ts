@@ -26,6 +26,7 @@ const FIELDS: Array<{ key: keyof Settings; label: string; type?: string; hint?: 
   { key: 'sttModel', label: 'STT model override', hint: 'scribe_v1 · whisper-1 · nova-3' },
   { key: 'sttLanguage', label: 'Language code (blank = auto)', hint: 'en, de, …' },
   { key: 'micSource', label: 'Microphone', options: ['glasses', 'phone'] },
+  { key: 'scrollStep', label: 'Swipe scrolls by', options: ['page', 'half'], hint: 'page: 8 lines per swipe (fewer redraws) · half: 5 lines (more continuity)' },
   { key: 'feedDetail', label: 'Transcript detail', options: ['compact', 'verbose'], hint: 'compact: tool + one argument, results only on failure · verbose: argument/result previews and reasoning' },
   { key: 'maxListenSeconds', label: 'Max listen seconds', type: 'number' },
   { key: 'minAudioRms', label: 'Silence threshold (RMS)', type: 'number', hint: 'Clips quieter than this are ignored' },

@@ -251,6 +251,7 @@ export class Controller {
       f = new Feed(INNER_W, BODY_LINES)
       this.feeds.set(sessionId, f)
     }
+    f.step = this.settings.scrollStep === 'half' ? Math.ceil(BODY_LINES / 2) : BODY_LINES - 1
     return f
   }
 

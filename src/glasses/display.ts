@@ -115,6 +115,9 @@ export class Glasses {
   private queue: Promise<unknown> = Promise.resolve()
   private lastContent = new Map<number, string>()
   private pending = new Map<number, string>()
+  /** Latest content wanted per container; a queued write re-reads this so a backlog of stale
+   *  pages (fast swiping) collapses into the newest one instead of replaying every step. */
+  private desired = new Map<number, string>()
   private flushTimer: number | null = null
   private mirror: Record<string, string> = {}
 
@@ -142,6 +145,7 @@ export class Glasses {
     const page = { containerTotalNum: total, ...containers, ...(menu ? { menuObject: menu } : {}) }
     this.pending.clear()
     this.lastContent.clear()
+    this.desired.clear()
     for (const t of containers.textObject ?? []) this.lastContent.set(t.containerID!, t.content ?? '')
     if (!this.created) {
       const result = await this.bridge.createStartUpPageContainer(new CreateStartUpPageContainer(page))
@@ -243,22 +247,26 @@ export class Glasses {
   // ---- in-place updates (coalesced, ~120ms) ---------------------------------------------------
 
   private schedule(spec: { id: number; name: string }, content: string, mirrorKey: string): void {
-    this.pending.set(spec.id, clampUpgrade(content))
+    const text = clampUpgrade(content)
+    this.pending.set(spec.id, text)
+    this.desired.set(spec.id, text)
     this.mirror[mirrorKey] = content
     if (this.flushTimer !== null) return
     this.flushTimer = window.setTimeout(() => {
       this.flushTimer = null
-      const batch = [...this.pending.entries()]
+      const batch = [...this.pending.keys()]
       this.pending.clear()
       const layout = this.layout
       if (layout) this.events.onMirror?.(layout, this.mirror)
-      for (const [id, text] of batch) {
-        if (this.lastContent.get(id) === text) continue
+      for (const id of batch) {
         const name = Object.values(IDS).find(s => s.id === id)?.name ?? ''
-        this.lastContent.set(id, text)
-        void this.enqueue(() =>
-          this.bridge.textContainerUpgrade(new TextContainerUpgrade({ containerID: id, containerName: name, content: text })),
-        )
+        void this.enqueue(async () => {
+          // Resolve the content at send time: only the newest wanted page goes over BLE.
+          const latest = this.desired.get(id)
+          if (latest === undefined || this.lastContent.get(id) === latest) return true
+          this.lastContent.set(id, latest)
+          return this.bridge.textContainerUpgrade(new TextContainerUpgrade({ containerID: id, containerName: name, content: latest }))
+        })
       }
     }, 120)
   }
