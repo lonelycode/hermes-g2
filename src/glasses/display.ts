@@ -250,6 +250,7 @@ export class Glasses {
     const text = clampUpgrade(content)
     this.pending.set(spec.id, text)
     this.desired.set(spec.id, text)
+    if (spec.id === IDS.body.id) this.animSeq++ // a plain body write cancels a running transition
     this.mirror[mirrorKey] = content
     if (this.flushTimer !== null) return
     this.flushTimer = window.setTimeout(() => {
@@ -273,6 +274,39 @@ export class Glasses {
 
   updateBody(content: string): void {
     if (this.layout === 'chat') this.schedule(IDS.body, content || ' ', 'body')
+  }
+
+  private animSeq = 0
+
+  /**
+   * Write a short sequence of body frames in order (a page-turn transition). A newer animation
+   * or a plain updateBody supersedes the remaining frames. The last frame becomes the settled
+   * content, so later coalesced writes compare against it.
+   */
+  animateBody(frames: Array<{ content: string; textColor?: number }>, gapMs: number): void {
+    if (this.layout !== 'chat' || !frames.length) return
+    const seq = ++this.animSeq
+    const last = frames[frames.length - 1]
+    const final = clampUpgrade(last.content || ' ')
+    this.pending.delete(IDS.body.id)
+    this.desired.set(IDS.body.id, final)
+    this.mirror.body = last.content
+    const layout = this.layout
+    this.events.onMirror?.(layout, this.mirror)
+    void this.enqueue(async () => {
+      for (let i = 0; i < frames.length; i++) {
+        // Superseded by a newer animation or by a plain write: stop (its own frames follow).
+        if (seq !== this.animSeq || this.desired.get(IDS.body.id) !== final) return true
+        const f = frames[i]
+        const content = clampUpgrade(f.content || ' ')
+        this.lastContent.set(IDS.body.id, content)
+        await this.bridge.textContainerUpgrade(
+          new TextContainerUpgrade({ containerID: IDS.body.id, containerName: IDS.body.name, content, ...(f.textColor !== undefined ? { textColor: f.textColor } : {}) }),
+        )
+        if (i < frames.length - 1 && gapMs > 0) await new Promise(r => setTimeout(r, gapMs))
+      }
+      return true
+    })
   }
   updateStatus(content: string): void {
     if (this.layout === 'chat') this.schedule(IDS.status, content, 'status')

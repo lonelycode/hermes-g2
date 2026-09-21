@@ -21,8 +21,11 @@ async function main(): Promise<void> {
   let settings: Settings = await loadSettings(store)
   if (import.meta.env.DEV) {
     // ?scroll=smooth|page lets simulator runs try a scroll mode without touching stored settings.
-    const scroll = new URLSearchParams(location.search).get('scroll')
+    const q = new URLSearchParams(location.search)
+    const scroll = q.get('scroll')
     if (scroll === 'smooth' || scroll === 'page') settings = { ...settings, scrollMode: scroll }
+    const turn = q.get('turn')
+    if (turn === 'none' || turn === 'slide' || turn === 'fade' || turn === 'blink') settings = { ...settings, pageTransition: turn }
   }
 
   let controller: Controller | null = null

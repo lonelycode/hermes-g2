@@ -28,6 +28,7 @@ const FIELDS: Array<{ key: keyof Settings; label: string; type?: string; hint?: 
   { key: 'micSource', label: 'Microphone', options: ['glasses', 'phone'] },
   { key: 'typingSpeed', label: 'Typing speed', options: ['normal', 'slow', 'fast', 'off'], hint: 'Answers are revealed at a steady pace (slow ≈ 25, normal ≈ 45, fast ≈ 90 characters/s); off shows model output as it streams' },
   { key: 'scrollMode', label: 'Scrolling', options: ['page', 'smooth'], hint: 'page: the app redraws a page per swipe · smooth (experimental): the glasses scroll a multi-page window themselves, one line per swipe' },
+  { key: 'pageTransition', label: 'Page turn (page mode)', options: ['slide', 'fade', 'blink', 'none'], hint: 'slide: two in-between frames · fade: new page dim then bright · blink: blank frame first · none: instant' },
   { key: 'scrollStep', label: 'Swipe scrolls by (page mode)', options: ['page', 'half'], hint: 'page: 8 lines per swipe (fewer redraws) · half: 5 lines (more continuity)' },
   { key: 'feedDetail', label: 'Transcript detail', options: ['compact', 'verbose'], hint: 'compact: tool + one argument, results only on failure · verbose: argument/result previews and reasoning' },
   { key: 'maxListenSeconds', label: 'Max listen seconds', type: 'number' },

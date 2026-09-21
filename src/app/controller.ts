@@ -423,6 +423,32 @@ export class Controller {
     return true
   }
 
+  /** Page mode: move from one line offset to another with the configured motion cue. */
+  private turnPage(from: number, to: number): void {
+    const feed = this.feed()
+    const target = feed.page()
+    const style = this.settings.pageTransition
+    let frames: Array<{ content: string; textColor?: number }>
+    if (style === 'slide' && Math.abs(to - from) >= 3) {
+      const d = to - from
+      frames = [feed.pageAt(from + Math.round(d / 3)), feed.pageAt(from + Math.round((2 * d) / 3)), target].map(content => ({ content }))
+    } else if (style === 'fade') {
+      frames = [
+        { content: target, textColor: 1 },
+        { content: target, textColor: 4 },
+      ]
+    } else if (style === 'blink') {
+      frames = [{ content: ' ' }, { content: target }]
+    } else {
+      frames = [{ content: target }]
+    }
+    if (frames.length > 1) this.glasses.animateBody(frames, style === 'slide' ? 70 : 90)
+    else this.glasses.updateBody(target)
+    this.glasses.updateStatus(this.statusLine())
+    this.syncSpinner()
+    this.emit()
+  }
+
   private render(sessionId?: string): void {
     if (this.screen !== 'chat' || !this.session) return
     if (sessionId && sessionId !== this.session.id) return
@@ -1050,14 +1076,17 @@ export class Controller {
         if (this.mode === 'listening') return this.cancelListening()
         return this.goToMenu()
       }
-      case 'up': {
-        if (this.smooth ? this.shiftWindow('up') : this.feed().scrollUp()) this.render()
-        return
-      }
+      case 'up':
       case 'down': {
-        if (this.smooth) this.shiftWindow('down')
-        else this.feed().scrollDown()
-        this.render()
+        if (this.smooth) {
+          if (this.shiftWindow(g.kind) || g.kind === 'down') this.render()
+          return
+        }
+        const feed = this.feed()
+        const from = feed.lineOffset
+        const moved = g.kind === 'up' ? feed.scrollUp() : feed.scrollDown()
+        if (moved) this.turnPage(from, feed.lineOffset)
+        else this.render()
         return
       }
     }

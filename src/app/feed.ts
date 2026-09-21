@@ -223,6 +223,19 @@ export class Feed {
     return Math.max(0, (this.flat ?? this.lines()).length - this.pageLines)
   }
 
+  /** Current line offset of the page (page mode). */
+  get lineOffset(): number {
+    this.lines()
+    return this.offset
+  }
+
+  /** Page text starting at an arbitrary line offset (used for transition frames). */
+  pageAt(offset: number): string {
+    const lines = this.lines()
+    const from = Math.max(0, Math.min(offset, Math.max(0, lines.length - 1)))
+    return lines.slice(from, from + this.pageLines).join('\n')
+  }
+
   /** Text for the current page. */
   page(): string {
     const lines = this.lines()
