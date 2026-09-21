@@ -48,7 +48,10 @@ async function main(): Promise<void> {
   }
   companion.setBridgeState('ready')
 
-  const glasses = new Glasses(bridge, { onMirror: (layout, c) => companion.setMirror(layout, c) })
+  const glasses = new Glasses(bridge, {
+    onMirror: (layout, c) => companion.setMirror(layout, c),
+    onWriteStats: st => companion.setWriteStats(st),
+  })
   controller = new Controller({
     bridge,
     glasses,

@@ -328,7 +328,10 @@ export class Controller {
     if (want && this.spinTimer === null) {
       this.spinTimer = window.setInterval(() => {
         this.spinFrame++
-        if (this.screen === 'chat') this.glasses.updateStatus(this.statusLine())
+        // While an answer is being revealed the body write cadence already animates the
+        // display; keep the status bar to one write per two ticks to spare the link.
+        const revealing = !!this.session && this.typingFor(this.session.id)
+        if (this.screen === 'chat' && (!revealing || this.spinFrame % 2 === 0)) this.glasses.updateStatus(this.statusLine())
         if (!this.busy()) this.syncSpinner()
       }, 500)
     } else if (!want && this.spinTimer !== null) {
@@ -531,7 +534,7 @@ export class Controller {
   private async typeLoop(): Promise<void> {
     if (this.typeLoopRunning) return
     this.typeLoopRunning = true
-    const MIN_STEP_MS = 140
+    const MIN_STEP_MS = 260
     let last = Date.now() - MIN_STEP_MS
     try {
       while (this.typing.size && !this.stopped) {
@@ -552,8 +555,6 @@ export class Controller {
           else this.emit()
         }
         if (visibleSession) {
-          this.glasses.updateStatus(this.statusLine())
-          this.syncSpinner()
           this.emit()
           await this.glasses.updateBodyNow(this.bodyText())
         }

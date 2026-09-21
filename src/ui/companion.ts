@@ -4,6 +4,7 @@
 import { DEFAULT_SETTINGS, normalizeSettings, type Settings } from '../config.ts'
 import { HermesClient } from '../hermes/client.ts'
 import type { ControllerSnapshot } from '../app/controller.ts'
+import type { WriteStats } from '../glasses/display.ts'
 
 export interface CompanionCallbacks {
   onSave(settings: Settings): Promise<void>
@@ -14,6 +15,7 @@ export interface Companion {
   setBridgeState(text: string): void
   setSnapshot(snap: ControllerSnapshot): void
   setMirror(layout: string, containers: Record<string, string>): void
+  setWriteStats(stats: WriteStats): void
   log(line: string): void
 }
 
@@ -43,7 +45,7 @@ export function mountCompanion(root: HTMLElement, initial: Settings, cb: Compani
         <div id="bridge" class="chip chip-muted">bridge: waiting</div>
       </header>
       <section class="card">
-        <div class="row"><span id="screen" class="chip">boot</span><span id="run" class="chip chip-muted">no run</span><span id="audio" class="chip chip-muted">audio: –</span></div>
+        <div class="row"><span id="screen" class="chip">boot</span><span id="run" class="chip chip-muted">no run</span><span id="audio" class="chip chip-muted">audio: –</span><span id="link" class="chip chip-muted">display: –</span></div>
         <div class="mirror-title">Glasses</div>
         <pre id="mirror" class="mirror">(nothing rendered yet)</pre>
         <form id="sendForm" class="row">
@@ -194,6 +196,7 @@ export function mountCompanion(root: HTMLElement, initial: Settings, cb: Compani
   const screenEl = root.querySelector<HTMLSpanElement>('#screen')!
   const runEl = root.querySelector<HTMLSpanElement>('#run')!
   const audioEl = root.querySelector<HTMLSpanElement>('#audio')!
+  const linkEl = root.querySelector<HTMLSpanElement>('#link')!
   const mirrorEl = root.querySelector<HTMLPreElement>('#mirror')!
 
   return {
@@ -209,6 +212,10 @@ export function mountCompanion(root: HTMLElement, initial: Settings, cb: Compani
       audioEl.textContent = snap.lastAudio
         ? `audio: ${snap.lastAudio.seconds}s rms ${snap.lastAudio.rms} peak ${snap.lastAudio.peak}`
         : 'audio: –'
+    },
+    setWriteStats(st) {
+      linkEl.textContent = `display: ${st.lastMs} ms (avg ${st.avgMs}) · queue ${st.queued} · ${(st.bytesPer5s / 5 / 1024).toFixed(1)} KB/s`
+      linkEl.className = `chip ${st.avgMs > 400 || st.queued > 3 ? 'chip-live' : 'chip-muted'}`
     },
     setMirror(layout, containers) {
       mirrorEl.textContent = `[${layout}]\n` + Object.entries(containers).map(([k, v]) => `── ${k} ──\n${v}`).join('\n')

@@ -107,6 +107,19 @@ export interface ApprovalPage {
 
 export interface GlassesEvents {
   onMirror?(layout: LayoutName, containers: Record<string, string>): void
+  /** Bridge write timing, for diagnosing a saturated BLE link. */
+  onWriteStats?(stats: WriteStats): void
+}
+
+export interface WriteStats {
+  /** Milliseconds the last textContainerUpgrade took to be accepted by the host. */
+  lastMs: number
+  /** Rolling average over the last 20 writes. */
+  avgMs: number
+  /** Writes currently waiting in the app-side queue. */
+  queued: number
+  /** Bytes sent in the last 5 seconds. */
+  bytesPer5s: number
 }
 
 export class Glasses {
@@ -130,10 +143,37 @@ export class Glasses {
     return this.layout
   }
 
+  private queued = 0
+  private recent: number[] = []
+  private sent: Array<{ at: number; bytes: number }> = []
+
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.queue.then(fn, fn)
+    this.queued++
+    const run = this.queue.then(fn, fn).finally(() => this.queued--)
     this.queue = run.catch(err => console.error(`[glasses] bridge call failed: ${(err as Error)?.message ?? err}`))
     return run
+  }
+
+  /** textContainerUpgrade wrapped with timing/byte accounting. */
+  private async upgrade(id: number, name: string, content: string, textColor?: number): Promise<boolean> {
+    const t0 = Date.now()
+    const ok = await this.bridge.textContainerUpgrade(
+      new TextContainerUpgrade({ containerID: id, containerName: name, content, ...(textColor !== undefined ? { textColor } : {}) }),
+    )
+    const ms = Date.now() - t0
+    this.recent.push(ms)
+    if (this.recent.length > 20) this.recent.shift()
+    const now = Date.now()
+    this.sent.push({ at: now, bytes: content.length })
+    this.sent = this.sent.filter(x => now - x.at < 5000)
+    if (ms > 400) console.warn(`[glasses] slow write: ${ms}ms for ${content.length} chars (queue ${this.queued})`)
+    this.events.onWriteStats?.({
+      lastMs: ms,
+      avgMs: Math.round(this.recent.reduce((a, b) => a + b, 0) / this.recent.length),
+      queued: this.queued,
+      bytesPer5s: this.sent.reduce((a, x) => a + x.bytes, 0),
+    })
+    return ok
   }
 
   private async buildPage(
@@ -266,7 +306,7 @@ export class Glasses {
           const latest = this.desired.get(id)
           if (latest === undefined || this.lastContent.get(id) === latest) return true
           this.lastContent.set(id, latest)
-          return this.bridge.textContainerUpgrade(new TextContainerUpgrade({ containerID: id, containerName: name, content: latest }))
+          return this.upgrade(id, name, latest)
         })
       }
     }, 120)
@@ -287,9 +327,7 @@ export class Glasses {
     this.events.onMirror?.('chat', this.mirror)
     if (this.lastContent.get(IDS.body.id) === text) return this.flush()
     this.lastContent.set(IDS.body.id, text)
-    return this.enqueue(() =>
-      this.bridge.textContainerUpgrade(new TextContainerUpgrade({ containerID: IDS.body.id, containerName: IDS.body.name, content: text })),
-    ).then(() => undefined)
+    return this.enqueue(() => this.upgrade(IDS.body.id, IDS.body.name, text)).then(() => undefined)
   }
 
   private animSeq = 0
@@ -316,9 +354,7 @@ export class Glasses {
         const f = frames[i]
         const content = clampUpgrade(f.content || ' ')
         this.lastContent.set(IDS.body.id, content)
-        await this.bridge.textContainerUpgrade(
-          new TextContainerUpgrade({ containerID: IDS.body.id, containerName: IDS.body.name, content, ...(f.textColor !== undefined ? { textColor: f.textColor } : {}) }),
-        )
+        await this.upgrade(IDS.body.id, IDS.body.name, content, f.textColor)
         if (i < frames.length - 1 && gapMs > 0) await new Promise(r => setTimeout(r, gapMs))
       }
       return true
