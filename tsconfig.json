@@ -17,5 +17,5 @@
     "verbatimModuleSyntax": true,
     "types": ["vite/client", "node"]
   },
-  "include": ["src", "shared", "test"]
+  "include": ["src", "shared", "test", "proxy/ws-min.d.mts"]
 }

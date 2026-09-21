@@ -16,6 +16,7 @@ import {
   type RunStatus,
 } from '../hermes/types.ts'
 import { transcribePcm } from '../stt/index.ts'
+import { startLiveTranscription, type LiveSession } from '../stt/live.ts'
 import { concatChunks, pcmStats } from '../stt/wav.ts'
 import { APPROVAL_BODY_LINES, BODY_LINES, Glasses, INNER_W, MENU_ITEMS, MENU_OBJECT } from '../glasses/display.ts'
 import type { Gesture } from '../glasses/input.ts'
@@ -87,6 +88,8 @@ export class Controller {
   private approval: ApprovalView | null = null
   private chunks: Uint8Array[] = []
   private chunkBytes = 0
+  private live: LiveSession | null = null
+  private draft: FeedEntry | null = null
   private listenStart = 0
   private listenTimer: number | null = null
   private tickTimer: number | null = null
@@ -289,7 +292,8 @@ export class Controller {
     const where = pos.pages > 1 ? `${pos.page}/${pos.pages}${pos.atEnd ? '' : '↓'} ` : ''
     if (this.mode === 'listening') {
       const s = Math.floor((Date.now() - this.listenStart) / 1000)
-      return `● Listening ${s}s · tap: send · double: cancel`
+      const live = this.live ? (this.live.failed ? ' (no live preview)' : '') : ''
+      return `● Listening ${s}s${live} · tap: send · double: cancel`
     }
     if (this.mode === 'transcribing') return `◌ Transcribing… ${where}`
     if (this.mode === 'sending') return `◌ Sending… ${where}`
@@ -324,6 +328,23 @@ export class Controller {
     if (this.chunkBytes + pcm.byteLength > cap) return
     this.chunks.push(pcm)
     this.chunkBytes += pcm.byteLength
+    this.live?.sendPcm(pcm)
+  }
+
+  /** Show the live transcript as the pending user turn at the bottom of the feed. */
+  private showDraft(final: string, interim: string): void {
+    if (this.mode !== 'listening' && this.mode !== 'transcribing') return
+    const text = interim ? `${final} ${interim}…`.trim() : final
+    const feed = this.feed()
+    if (!this.draft) this.draft = feed.add('user', text)
+    else feed.update(this.draft, { text })
+    feed.jumpToEnd()
+    this.render()
+  }
+
+  private dropDraft(): void {
+    if (this.draft) this.feed().remove(this.draft)
+    this.draft = null
   }
 
   private clearListenTimers(): void {
@@ -352,6 +373,13 @@ export class Controller {
       return
     }
     this.log('listening')
+    this.live = startLiveTranscription(this.settings, {
+      onPartial: (final, interim) => this.showDraft(final, interim),
+      onError: msg => {
+        this.log(`live transcription: ${msg}`)
+        this.render()
+      },
+    })
     this.listenTimer = window.setTimeout(() => void this.stopAndSend(), this.settings.maxListenSeconds * 1000)
     this.tickTimer = window.setInterval(() => this.render(), 1000)
     this.render()
@@ -363,6 +391,9 @@ export class Controller {
     this.mode = 'idle'
     this.chunks = []
     this.chunkBytes = 0
+    this.live?.cancel()
+    this.live = null
+    this.dropDraft()
     try {
       await this.deps.bridge.audioControl(false)
     } catch {
@@ -387,31 +418,52 @@ export class Controller {
     const stats = pcmStats(pcm)
     this.lastAudio = { seconds: +stats.seconds.toFixed(2), rms: Math.round(stats.rms), peak: stats.peak }
     this.log(`audio: ${stats.seconds.toFixed(2)}s rms=${Math.round(stats.rms)} peak=${stats.peak}`)
-    if (stats.seconds < 0.3 || stats.rms < this.settings.minAudioRms) {
-      this.mode = 'idle'
-      this.glasses.updateStatus(`· No audio (${stats.seconds.toFixed(1)}s, rms ${Math.round(stats.rms)}) · tap: talk`)
-      this.emit()
-      return
-    }
     this.render()
+
+    // 1. Live transcript (already on screen) — just flush it.
     let text = ''
-    try {
-      text = await transcribePcm(pcm, this.settings)
-    } catch (err) {
-      this.mode = 'idle'
-      this.feed().add('error', `transcription failed: ${(err as Error).message}`)
-      this.log(`stt failed: ${(err as Error).message}`)
-      this.render()
-      return
+    const live = this.live
+    this.live = null
+    if (live) {
+      try {
+        text = (await live.finish()).trim()
+      } catch (err) {
+        this.log(`live finish failed: ${(err as Error).message}`)
+      }
+      if (text) this.log(`heard (live): ${text}`)
     }
-    if (!text.trim()) {
-      this.mode = 'idle'
-      this.glasses.updateStatus('· Nothing heard · tap: talk')
-      this.emit()
-      return
+
+    // 2. Otherwise the batch path, guarded by the silence rule.
+    if (!text) {
+      if (stats.seconds < 0.3 || stats.rms < this.settings.minAudioRms) {
+        this.mode = 'idle'
+        this.dropDraft()
+        this.glasses.updateStatus(`· No audio (${stats.seconds.toFixed(1)}s, rms ${Math.round(stats.rms)}) · tap: talk`)
+        this.emit()
+        return
+      }
+      try {
+        text = (await transcribePcm(pcm, this.settings)).trim()
+      } catch (err) {
+        this.mode = 'idle'
+        this.dropDraft()
+        this.feed().add('error', `transcription failed: ${(err as Error).message}`)
+        this.log(`stt failed: ${(err as Error).message}`)
+        this.render()
+        return
+      }
+      if (!text) {
+        this.mode = 'idle'
+        this.dropDraft()
+        this.glasses.updateStatus('· Nothing heard · tap: talk')
+        this.emit()
+        return
+      }
+      this.log(`heard: ${text}`)
     }
-    this.log(`heard: ${text}`)
-    await this.submit(text.trim())
+    const entry = this.draft
+    this.draft = null
+    await this.submit(text, entry ?? undefined)
   }
 
   // ---- runs ------------------------------------------------------------------------------------
@@ -431,12 +483,13 @@ export class Controller {
     await this.submit(clean)
   }
 
-  private async submit(text: string): Promise<void> {
+  private async submit(text: string, entry?: FeedEntry): Promise<void> {
     if (!this.session) return
     this.mode = 'sending'
     const sessionId = this.session.id
     const feed = this.feed(sessionId)
-    feed.add('user', text)
+    if (entry) feed.update(entry, { text })
+    else feed.add('user', text)
     feed.jumpToEnd()
     this.render(sessionId)
 

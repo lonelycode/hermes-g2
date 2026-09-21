@@ -50,7 +50,10 @@ src/glasses/input.ts     ring/temple event → gesture
 src/stt/                 PCM → WAV, transcription entry point
 src/ui/companion.ts      phone-side settings / test / mirror / log
 shared/stt-providers.mjs ElevenLabs Scribe · OpenAI-compatible · Deepgram adapters (used by app + proxy)
-proxy/server.mjs         CORS-clean reverse proxy for Hermes + STT relay
+shared/stt-live.mjs      Deepgram live (streaming) client, used by the app (direct) and the proxy relay
+src/stt/live.ts          live session: proxy relay or direct Deepgram, with batch fallback
+proxy/server.mjs         CORS-clean reverse proxy for Hermes + STT relay (batch + live WebSocket)
+proxy/ws-min.mjs         dependency-free RFC 6455 server framing for the live relay
 scripts/mock-hermes.mjs  fake gateway for the simulator
 scripts/hermes-cors-patch.py  optional: patch the real gateway instead of proxying
 ```
@@ -67,7 +70,7 @@ npm run proxy                # http://0.0.0.0:8643
 curl http://<host>:8643/proxy/health
 ```
 
-The proxy forwards everything else to Hermes untouched (streaming both ways, `Origin` stripped so the gateway's own CORS list is irrelevant), adds CORS to every response including SSE, and serves `POST /stt/transcribe` so the STT key never lands on the phone. Point the app at `http://<host>:8643`.
+The proxy forwards everything else to Hermes untouched (streaming both ways, `Origin` stripped so the gateway's own CORS list is irrelevant), adds CORS to every response including SSE, authenticates the phone with `PROXY_AUTH_KEY` (defaults to `HERMES_API_KEY`) before injecting the real gateway key upstream, and serves `POST /stt/transcribe` plus the `ws://…/stt/stream` live relay so the STT key never lands on the phone. Point the app at `http://<host>:8643`. Set `STT_LIVE_DEBUG=1` to log the raw Deepgram messages.
 
 **Option B — patch the gateway** (re-apply after `hermes update`):
 
@@ -87,7 +90,9 @@ Keep the gateway on a private network (Tailscale). Never expose it or the proxy 
 
 The glasses deliver raw 16 kHz PCM; Hermes has no audio endpoint, so a transcription provider is required. Supported: **ElevenLabs Scribe** (`scribe_v1`), any **OpenAI-compatible** `/v1/audio/transcriptions` (OpenAI, Groq, whisper.cpp / faster-whisper servers), **Deepgram** (`nova-3`). Choose `proxy` mode in the app to keep the key on the server, or a direct mode with the key entered on the phone.
 
-Clips are recorded while listening and sent on the second tap. Clips shorter than 0.3 s or quieter than the RMS threshold (default 200, tune it in settings using the audio stats shown in the companion UI) are discarded.
+**Live preview.** With `proxy` mode (when the proxy's `STT_PROVIDER=deepgram`) or `deepgram` mode, the transcript streams onto the glasses while you talk: the pending turn appears at the bottom of the feed as `▶ what changed in the …` and updates every few hundred milliseconds, so you can see a mis-hearing before you send. The second tap flushes the stream and sends the final text (typically within 200 ms). The proxy relays this over a WebSocket at `ws://<proxy>/stt/stream` (authenticated with the same key), so whitelist the proxy's `ws://` origin as well as `http://` in `app.json` when packaging. ElevenLabs and OpenAI modes have no live path; they transcribe the whole clip after the second tap, and the app also falls back to that if the live socket fails.
+
+Clips shorter than 0.3 s or quieter than the RMS threshold (default 200, tune it in settings using the audio stats shown in the companion UI) are discarded.
 
 ## 3. Run it
 

@@ -14,7 +14,8 @@
         "http://100.64.0.1:8643",
         "https://api.elevenlabs.io",
         "https://api.openai.com",
-        "https://api.deepgram.com"
+        "https://api.deepgram.com",
+        "wss://api.deepgram.com"
       ]
     },
     {

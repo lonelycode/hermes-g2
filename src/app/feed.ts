@@ -75,6 +75,14 @@ export class Feed {
     this.flat = null
   }
 
+  remove(entry: FeedEntry): void {
+    const i = this.entries.indexOf(entry)
+    if (i === -1) return
+    this.entries.splice(i, 1)
+    this.cache.delete(entry.id)
+    this.flat = null
+  }
+
   append(entry: FeedEntry, delta: string): void {
     this.update(entry, { text: entry.text + delta })
   }

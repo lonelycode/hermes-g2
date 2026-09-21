@@ -4,6 +4,9 @@
 //
 //   node proxy/server.mjs
 //
+// GET /stt/stream is a WebSocket relay for live transcription (Deepgram): the phone streams
+// 16 kHz PCM frames, the proxy forwards them to Deepgram and returns interim/final transcripts.
+//
 // Every request that is not /stt/* or /proxy/* is forwarded verbatim to HERMES_URL (streaming
 // bodies both ways, no buffering), and every response — including the SSE run event stream —
 // gets CORS headers. The Origin header is not forwarded, so the gateway's own CORS allow-list
@@ -19,6 +22,8 @@ import { extname, join, normalize, resolve } from 'node:path'
 import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { transcribeWithProvider } from '../shared/stt-providers.mjs'
+import { openDeepgramLive } from '../shared/stt-live.mjs'
+import { handshake, wrapSocket } from './ws-min.mjs'
 
 loadDotEnv()
 
@@ -227,10 +232,79 @@ const server = createServer(async (req, res) => {
   }
 })
 
+// ---- live transcription relay ---------------------------------------------------------------
+server.on('upgrade', (req, socket) => {
+  const url = new URL(req.url || '/', 'http://proxy')
+  if (url.pathname !== '/stt/stream') {
+    socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n')
+    return socket.destroy()
+  }
+  const token = url.searchParams.get('token') || ''
+  if (PROXY_AUTH_KEY && token !== PROXY_AUTH_KEY) {
+    console.warn(`[stt-live] rejected: client token ${token ? `${token.length} chars` : 'missing'}`)
+    socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
+    return socket.destroy()
+  }
+  if (!handshake(req, socket)) return socket.destroy()
+  const client = wrapSocket(socket, {
+    onMessage: (data, isBinary) => {
+      if (isBinary) dg?.sendPcm(data)
+      else if (/"finish"/.test(String(data))) {
+        finishing = true
+        if (dg) dg.finish()
+        else done('')
+      }
+    },
+    onClose: () => dg?.close(),
+    onError: err => console.error('[stt-live] client socket error:', err.message),
+  })
+  const sendJson = obj => client.send(JSON.stringify(obj))
+  let finishing = false
+  let finished = false
+  const done = final => {
+    if (finished) return
+    finished = true
+    sendJson({ type: 'done', final })
+    client.close()
+  }
+  if (STT.provider !== 'deepgram' || !STT.apiKey) {
+    sendJson({ type: 'error', message: `live transcription needs STT_PROVIDER=deepgram on the proxy (current: ${STT.apiKey ? STT.provider : 'not configured'})` })
+    return client.close(1011, 'unsupported')
+  }
+  const language = url.searchParams.get('language') || STT.language
+  const t0 = Date.now()
+  let frames = 0
+  let dg
+  try {
+    dg = openDeepgramLive({ apiKey: STT.apiKey, url: STT.url && /^wss?:/.test(STT.url) ? STT.url : undefined, model: STT.model, language }, {
+      onOpen: () => console.log('[stt-live] deepgram connected'),
+      onRaw: msg => { if (process.env.STT_LIVE_DEBUG) console.log('[stt-live] <-', JSON.stringify(msg).slice(0, 300)) },
+      onTranscript: t => sendJson({ type: 'transcript', final: t.final, interim: t.interim }),
+      onError: err => {
+        console.error('[stt-live] deepgram error:', err?.message || err)
+        sendJson({ type: 'error', message: String(err?.message || err) })
+      },
+      onClose: ({ final, code, reason }) => {
+        console.log(`[stt-live] deepgram closed (${code || ''} ${reason || ''}) after ${frames} frames, ${Date.now() - t0}ms -> ${final.length} chars`)
+        if (!finishing) sendJson({ type: 'error', message: `Deepgram closed early (${code || 'no code'} ${reason || ''})`.trim() })
+        done(final)
+      },
+    })
+    const rawSend = dg.sendPcm
+    dg.sendPcm = pcm => {
+      frames++
+      rawSend(pcm)
+    }
+  } catch (err) {
+    sendJson({ type: 'error', message: err.message })
+    client.close(1011, 'deepgram')
+  }
+})
+
 server.listen(PORT, HOST, () => {
   console.log(`[proxy] listening on http://${HOST}:${PORT}`)
   console.log(`[proxy] forwarding to ${HERMES_URL}${HERMES_API_KEY ? ` (injecting gateway key upstream; clients must send the ${PROXY_AUTH_KEY.length}-char PROXY_AUTH_KEY)` : ' (passing client keys through)'}`)
-  console.log(`[proxy] STT: ${STT.apiKey ? STT.provider + (STT.model ? ` (${STT.model})` : '') : 'not configured'}${PROXY_AUTH_KEY ? ', bearer-protected' : ', OPEN — set PROXY_AUTH_KEY'}`)
+  console.log(`[proxy] STT: ${STT.apiKey ? STT.provider + (STT.model ? ` (${STT.model})` : '') : 'not configured'}${PROXY_AUTH_KEY ? ', bearer-protected' : ', OPEN — set PROXY_AUTH_KEY'}${STT.provider === 'deepgram' && STT.apiKey ? ', live relay at ws://.../stt/stream' : ''}`)
   if (SERVE_DIR) console.log(`[proxy] serving static files from ${SERVE_DIR}`)
 })
 

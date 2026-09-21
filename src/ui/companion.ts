@@ -20,7 +20,7 @@ export interface Companion {
 const FIELDS: Array<{ key: keyof Settings; label: string; type?: string; hint?: string; options?: string[] }> = [
   { key: 'hermesUrl', label: 'Hermes URL (gateway or proxy)', hint: 'e.g. http://100.x.y.z:8642 — or the proxy on :8643' },
   { key: 'hermesKey', label: 'Hermes API key', type: 'password' },
-  { key: 'sttMode', label: 'Speech-to-text', options: ['proxy', 'elevenlabs', 'openai', 'deepgram'] },
+  { key: 'sttMode', label: 'Speech-to-text', options: ['proxy', 'elevenlabs', 'openai', 'deepgram'], hint: 'Live preview while talking: proxy (when the proxy uses Deepgram) or deepgram. elevenlabs/openai transcribe after you tap send.' },
   { key: 'sttKey', label: 'STT API key (direct modes)', type: 'password' },
   { key: 'sttUrl', label: 'STT base URL override', hint: 'OpenAI-compatible server, self-hosted Deepgram …' },
   { key: 'sttModel', label: 'STT model override', hint: 'scribe_v1 · whisper-1 · nova-3' },
