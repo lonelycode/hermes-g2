@@ -139,8 +139,14 @@ export class Feed {
     let lines = this.cache.get(entry.id)
     if (!lines) {
       const prefix = entry.kind === 'tool' ? (entry.done ? (entry.failed ? PREFIX_TOOL_FAILED : PREFIX_TOOL_DONE) : PREFIX.tool) : PREFIX[entry.kind]
-      const body = entry.text.trim() ? entry.text : entry.kind === 'assistant' ? '…' : ''
-      lines = TURN_KINDS.has(entry.kind) ? wrapText(prefix + body, this.width) : wrapText(prefix + body, this.width - STEP_INDENT_PX)
+      const body = entry.text.trim() ? entry.text.replace(/^\s+/, '') : entry.kind === 'assistant' ? '…' : ''
+      if (entry.kind === 'assistant') {
+        // The answer label gets its own line; the text below runs full width, identical while
+        // streaming and once complete.
+        lines = [PREFIX.assistant.trim(), ...wrapText(body, this.width)]
+      } else {
+        lines = TURN_KINDS.has(entry.kind) ? wrapText(prefix + body, this.width) : wrapText(prefix + body, this.width - STEP_INDENT_PX)
+      }
       if (!lines.length) lines = [prefix.trim()]
       this.cache.set(entry.id, lines)
     }

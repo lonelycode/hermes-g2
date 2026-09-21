@@ -29,8 +29,9 @@ The chat feed shows every interstitial step, not just the answer:
  │ → HTTP 429 rate limited by provider
  └ » subagent: Summarise the directory listing
 
-■ Hermes: The directory has 12 entries. The only
-document is notes.md …
+■ Hermes:
+The directory has 12 entries. The only document is
+notes.md …
 ```
 
 Turns are labelled (`▶ You:` / `■ Hermes:`) and flush-left; everything that happens in between (tool steps `○/●/×` running / done / failed, `·` commentary or system notes, `»` subagents, `?` approvals) hangs off the turn as a tree (`├` / `└`, continuation lines under `│`). When an answer starts, the page is anchored so its `■ Hermes:` line is the first thing on screen, and it stays there while the answer streams in; swipe to read on, which releases the anchor. The status bar animates (`●○○ → ○●○ → ○○●`) whenever something is in flight and names the state: connecting, thinking, the running tool, working (polling), waiting for approval, transcribing, sending. Only glyphs present in the G2 firmware font are used (see `scripts/check-glyphs.mjs`).
