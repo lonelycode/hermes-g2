@@ -8,10 +8,16 @@
   "permissions": [
     {
       "name": "network",
-      "desc": "Talks to your self-hosted Hermes Agent gateway (or the bundled proxy) and your speech-to-text provider.",
+      "desc": "Sends your voice and messages to your own Hermes Agent gateway (through the Hermes G2 proxy you run) and to the speech-to-text provider you configure. Nothing is sent to the app developer.",
       "whitelist": [
-        "http://100.64.0.1:8642",
-        "http://100.64.0.1:8643",
+        "http://10.13.0.84:8643",
+        "http://100.91.56.0:8643",
+        "http://agentbox.tail3143cb.ts.net:8643",
+        "http://100.106.22.119:8643",
+        "ws://10.13.0.84:8643",
+        "ws://100.91.56.0:8643",
+        "ws://agentbox.tail3143cb.ts.net:8643",
+        "ws://100.106.22.119:8643",
         "https://api.elevenlabs.io",
         "https://api.openai.com",
         "https://api.deepgram.com",
@@ -20,12 +26,14 @@
     },
     {
       "name": "g2-microphone",
-      "desc": "Captures your voice from the glasses mic array when you tap to talk."
+      "desc": "Captures your voice from the glasses microphones while you hold a tap-to-talk turn."
     },
     {
       "name": "phone-microphone",
-      "desc": "Optional fallback: capture your voice from the phone microphone instead of the glasses."
+      "desc": "Optional: capture your voice from the phone microphone instead of the glasses."
     }
   ],
-  "supported_languages": ["en"]
+  "supported_languages": [
+    "en"
+  ]
 }

@@ -23,7 +23,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node scripts/check-bundle.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "pack": "npm run build && evenhub pack app.json dist -o hermes-g2.ehpk --sdk-ver 0.0.15",
@@ -33,7 +33,8 @@
     "mock": "node scripts/mock-hermes.mjs",
     "icon": "node scripts/make-icon.mjs",
     "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
-    "proxy:setup": "node proxy/cli.mjs setup"
+    "proxy:setup": "node proxy/cli.mjs setup",
+    "pack:check": "npm run build && evenhub pack app.json dist -o hermes-g2.ehpk --sdk-ver 0.0.15 -c"
   },
   "devDependencies": {
     "@evenrealities/even_hub_sdk": "^0.0.15",

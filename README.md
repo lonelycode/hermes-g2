@@ -138,13 +138,21 @@ Scan the QR from the Even Hub tab. The companion page on the phone is where you 
 
 Simulator quirks worth knowing: its `/api/console` only flushes when bridge traffic happens and idle timers are throttled, so judge behaviour by `/api/screenshot/glasses`, not console timing. In dev builds `?say=hello%7Csecond&gap=8000` on the app URL types messages on a timer for scripted runs.
 
-**Package**: update the `network.whitelist` in `app.json` with the exact origins you use (gateway or proxy, and any direct STT host; wildcards are not supported), then
+## 4. Package and ship
 
-```bash
-npm run pack        # → hermes-g2.ehpk (builds first; uses --sdk-ver 0.0.15)
-```
+1. **Whitelist** — put the exact origins the app will talk to in `app.json` → `network.whitelist`: your proxy as both `http://host:8643` and `ws://host:8643` (the live-transcription socket), plus any direct STT host. Wildcards are not supported.
+2. **Build and pack** — production builds ignore every `.env*` file and `scripts/check-bundle.mjs` refuses to package a bundle containing a key from them:
 
-and sideload through the dev portal (Private Testing) or submit.
+   ```bash
+   npx evenhub login                 # once; needed for the package_id check and uploads
+   npm run pack:check                # build → secret check → evenhub pack -c (package_id available?)
+   npm run pack                      # same without the check → hermes-g2.ehpk
+   ```
+3. **Private build** — dev portal → your project → *Private builds* → upload `hermes-g2.ehpk`; on the phone: Even Hub tab → *Me → Apps → Private builds* → Install. This is the first place the manifest, permissions prompts and whitelist are enforced for real.
+4. **Beta build** — assign the build to a beta group and re-test with the phone locked for five minutes (reviewers do exactly this).
+5. **Submit** — Test → Submitted with 1–3 lines of release notes. Reviewers check the manifest, a legible greyscale icon (`public/icon.png`, drawn in the portal's 24×24 editor), a privacy policy covering every permission (`PRIVACY.md`), a first-run screen that explains setup (the app shows "Hermes unreachable … set the gateway URL and key in the phone app"), root-page double-tap → system exit dialog, and locked-phone operation.
+
+Released versions are immutable: fixes ship as a higher `version`.
 
 ## Hermes API surface used
 
