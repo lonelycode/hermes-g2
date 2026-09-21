@@ -5,8 +5,12 @@ export type SttMode = 'proxy' | 'elevenlabs' | 'openai' | 'deepgram'
 export type MicSource = 'glasses' | 'phone'
 /** compact: tool name + one argument, results only on failure. verbose: previews and reasoning. */
 export type FeedDetail = 'compact' | 'verbose'
-/** How far one swipe moves the transcript. */
+/** How far one swipe moves the transcript (page mode). */
 export type ScrollStep = 'page' | 'half'
+/** page: the app redraws a page per swipe. smooth: the glasses scroll a multi-page window natively. */
+export type ScrollMode = 'page' | 'smooth'
+/** Paced reveal of answers: off = show deltas as they arrive. */
+export type TypingSpeed = 'off' | 'slow' | 'normal' | 'fast'
 
 export interface Settings {
   hermesUrl: string
@@ -19,6 +23,8 @@ export interface Settings {
   micSource: MicSource
   feedDetail: FeedDetail
   scrollStep: ScrollStep
+  scrollMode: ScrollMode
+  typingSpeed: TypingSpeed
   maxListenSeconds: number
   /** RMS (0..32767) below which a clip counts as silence and is discarded. */
   minAudioRms: number
@@ -39,6 +45,8 @@ export const DEFAULT_SETTINGS: Settings = {
   micSource: 'glasses',
   feedDetail: 'compact',
   scrollStep: 'page',
+  scrollMode: 'page',
+  typingSpeed: 'normal',
   maxListenSeconds: 60,
   minAudioRms: 200,
 }
@@ -111,6 +119,8 @@ export function normalizeSettings(raw: Partial<Settings> | null | undefined): Se
   if (!['glasses', 'phone'].includes(s.micSource)) s.micSource = 'glasses'
   if (!['compact', 'verbose'].includes(s.feedDetail)) s.feedDetail = 'compact'
   if (!['page', 'half'].includes(s.scrollStep)) s.scrollStep = 'page'
+  if (!['page', 'smooth'].includes(s.scrollMode)) s.scrollMode = 'page'
+  if (!['off', 'slow', 'normal', 'fast'].includes(s.typingSpeed)) s.typingSpeed = 'normal'
   s.maxListenSeconds = clamp(Number(s.maxListenSeconds) || 60, 5, 300)
   s.minAudioRms = clamp(Number(s.minAudioRms) || 200, 0, 10000)
   return s

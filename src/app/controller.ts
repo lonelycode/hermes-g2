@@ -24,6 +24,7 @@ import { fitLine, oneLine, plainify, wrapText } from '../glasses/text.ts'
 import { Feed, type FeedEntry } from './feed.ts'
 import { looksLikeError, summarizeToolCall, summarizeToolResult } from './summaries.ts'
 import { cleanUserRow } from './history.ts'
+import { TYPING_CPS, nextReveal } from './typewriter.ts'
 
 export type Screen = 'boot' | 'error' | 'menu' | 'chat' | 'approval'
 export type ChatMode = 'idle' | 'listening' | 'transcribing' | 'sending'
@@ -39,6 +40,8 @@ interface RunTracker {
   assistant?: FeedEntry
   lastActivity: string
   approvalIds: Set<string>
+  /** Raw streamed answer text (typing mode reveals a prefix of it). */
+  streamed?: string
 }
 
 interface PendingApproval {
@@ -75,6 +78,9 @@ const CHOICE_LABEL: Record<ApprovalChoice, string> = {
 }
 
 const NEW_SESSION_LABEL = '+ New session'
+// Smooth-scroll window: the glasses scroll this natively; we only swap it at the edges.
+const WINDOW_LINES = 40
+const WINDOW_CHARS = 1900
 const POLL_MS = 2000
 const POLL_MAX_MS = 6 * 60 * 60 * 1000
 
@@ -93,6 +99,12 @@ export class Controller {
   private chunkBytes = 0
   private live: LiveSession | null = null
   private draft: FeedEntry | null = null
+  /** Smooth mode: first line of the window currently on the glasses, per session. */
+  private winStart = new Map<string, number>()
+  private winEnd = 0
+  /** Typing mode: full text received so far per answer entry; the entry shows a paced prefix. */
+  private typing = new Map<number, { entry: FeedEntry; sessionId: string; target: string; done: boolean }>()
+  private typeTimer: number | null = null
   private listenStart = 0
   private listenTimer: number | null = null
   private tickTimer: number | null = null
@@ -274,7 +286,7 @@ export class Controller {
     if (fresh && !feed.entries.length) {
       feed.add('system', `${session.title ?? 'New session'} — tap to talk`)
     }
-    await this.glasses.showChat({ body: feed.page(), status: this.statusLine() })
+    await this.glasses.showChat({ body: this.bodyText(), status: this.statusLine() })
     const pending = this.pendingApprovals.get(session.id)
     if (pending) await this.presentApproval(pending)
   }
@@ -300,6 +312,7 @@ export class Controller {
   /** Is anything in flight for the visible session (drives the status-bar animation)? */
   private busy(): boolean {
     if (this.mode === 'transcribing' || this.mode === 'sending' || this.mode === 'listening') return true
+    if (this.session && this.typingFor(this.session.id)) return true
     const tracker = this.session ? this.runs.get(this.session.id) : undefined
     return !!tracker && !TERMINAL_STATUSES.has(tracker.status)
   }
@@ -327,7 +340,11 @@ export class Controller {
   private statusLine(): string {
     const feed = this.feed()
     const pos = feed.position()
-    const where = pos.pages > 1 ? `${pos.page}/${pos.pages}${pos.atEnd ? '' : '↓'} ` : ''
+    const where = this.smooth
+      ? `${(this.winStart.get(this.session?.id ?? '') ?? 0) > 0 ? '↑' : ''}${this.winEnd < feed.lines().length ? '↓' : ''}`.replace(/(.)/, '$1 ')
+      : pos.pages > 1
+        ? `${pos.page}/${pos.pages}${pos.atEnd ? '' : '↓'} `
+        : ''
     const spin = this.spinner()
     if (this.mode === 'listening') {
       const s = Math.floor((Date.now() - this.listenStart) / 1000)
@@ -339,6 +356,9 @@ export class Controller {
     if (this.mode === 'sending') return `${spin} Sending to Hermes… ${where}`
     const tracker = this.session ? this.runs.get(this.session.id) : undefined
     if (this.pendingApprovals.has(this.session?.id ?? '')) return `? Approval needed · tap: review`
+    if (this.session && this.typingFor(this.session.id) && (!tracker || TERMINAL_STATUSES.has(tracker.status))) {
+      return `${spin} replying… · ${where}tap: talk`
+    }
     if (tracker && !TERMINAL_STATUSES.has(tracker.status)) {
       const state =
         tracker.status === 'waiting_for_approval'
@@ -355,10 +375,55 @@ export class Controller {
     return `${where}tap: talk · ↑↓ scroll · double: menu`
   }
 
+  private get smooth(): boolean {
+    return this.settings.scrollMode === 'smooth'
+  }
+
+  /** Text for the body container: one page, or (smooth mode) a native-scrollable window. */
+  private bodyText(): string {
+    const feed = this.feed()
+    if (!this.smooth) return feed.page()
+    const sessionId = this.session?.id ?? ''
+    const total = feed.lines().length
+    let start = this.winStart.get(sessionId)
+    const anchor = feed.anchorLine()
+    if (feed.anchored && anchor !== null) start = anchor
+    else if (feed.follow || start === undefined) start = Math.max(0, total - BODY_LINES)
+    start = Math.max(0, Math.min(start, Math.max(0, total - 1)))
+    const view = feed.viewport(start, WINDOW_LINES, WINDOW_CHARS)
+    this.winStart.set(sessionId, view.start)
+    this.winEnd = view.end
+    return view.text
+  }
+
+  /** Smooth mode: the glasses deliver swipe events only at the window edges; move the window. */
+  private shiftWindow(direction: 'up' | 'down'): boolean {
+    const feed = this.feed()
+    const sessionId = this.session?.id ?? ''
+    const total = feed.lines().length
+    const start = this.winStart.get(sessionId) ?? Math.max(0, total - BODY_LINES)
+    feed.releaseAnchor()
+    if (direction === 'down') {
+      if (this.winEnd >= total) {
+        feed.follow = true
+        return false
+      }
+      feed.follow = false
+      // The last visible lines become the top of the new window (a content update resets the
+      // scroll position to the top), so reading continues without a gap.
+      this.winStart.set(sessionId, Math.max(0, this.winEnd - (BODY_LINES - 1)))
+      return true
+    }
+    if (start <= 0) return false
+    feed.follow = false
+    this.winStart.set(sessionId, Math.max(0, start - BODY_LINES))
+    return true
+  }
+
   private render(sessionId?: string): void {
     if (this.screen !== 'chat' || !this.session) return
     if (sessionId && sessionId !== this.session.id) return
-    this.glasses.updateBody(this.feed().page())
+    this.glasses.updateBody(this.bodyText())
     this.glasses.updateStatus(this.statusLine())
     this.syncSpinner()
     this.emit()
@@ -408,6 +473,51 @@ export class Controller {
     this.clearListenTimers()
     if (this.spinTimer !== null) window.clearInterval(this.spinTimer)
     this.spinTimer = null
+    if (this.typeTimer !== null) window.clearInterval(this.typeTimer)
+    this.typeTimer = null
+  }
+
+  // ---- paced answer reveal ----------------------------------------------------------------------
+
+  private typingCps(): number {
+    return TYPING_CPS[this.settings.typingSpeed] ?? 0
+  }
+
+  /** Route answer text through the typewriter (or straight to the entry when typing is off). */
+  private setAnswerText(sessionId: string, entry: FeedEntry, text: string, done: boolean): void {
+    const feed = this.feed(sessionId)
+    if (!this.typingCps()) {
+      feed.update(entry, { text })
+      return
+    }
+    const job = this.typing.get(entry.id) ?? { entry, sessionId, target: '', done: false }
+    job.target = text
+    job.done = done
+    this.typing.set(entry.id, job)
+    if (this.typeTimer === null) this.typeTimer = window.setInterval(() => this.typeTick(), 150)
+  }
+
+  private typeTick(): void {
+    const perTick = Math.max(1, Math.round(this.typingCps() * 0.15))
+    for (const [id, job] of this.typing) {
+      const feed = this.feed(job.sessionId)
+      const next = nextReveal(job.entry.text, job.target, perTick)
+      if (next !== job.entry.text) feed.update(job.entry, { text: next })
+      if (job.entry.text === job.target) {
+        if (job.done) this.typing.delete(id)
+      }
+      this.render(job.sessionId)
+    }
+    if (!this.typing.size && this.typeTimer !== null) {
+      window.clearInterval(this.typeTimer)
+      this.typeTimer = null
+    }
+  }
+
+  /** Is an answer still being revealed for this session? (keeps the status bar animating) */
+  private typingFor(sessionId: string): boolean {
+    for (const job of this.typing.values()) if (job.sessionId === sessionId && job.entry.text !== job.target) return true
+    return false
   }
 
   private async startListening(): Promise<void> {
@@ -656,9 +766,12 @@ export class Controller {
       case 'message.delta': {
         if (!tracker.assistant) {
           tracker.assistant = feed.add('assistant', '')
+          tracker.streamed = ''
           this.anchorAnswer(feed, tracker.assistant)
         }
-        feed.append(tracker.assistant, ev.delta ?? '')
+        tracker.streamed = (tracker.streamed ?? '') + (ev.delta ?? '')
+        tracker.lastActivity = 'replying'
+        this.setAnswerText(tracker.sessionId, tracker.assistant, tracker.streamed, false)
         break
       }
       case 'message.interim': {
@@ -749,8 +862,11 @@ export class Controller {
     if (status === 'completed') {
       const text = plainify(output ?? '')
       if (text) {
-        if (tracker.assistant) feed.update(tracker.assistant, { text })
-        else this.anchorAnswer(feed, feed.add('assistant', text))
+        if (!tracker.assistant) {
+          tracker.assistant = feed.add('assistant', '')
+          this.anchorAnswer(feed, tracker.assistant)
+        }
+        this.setAnswerText(tracker.sessionId, tracker.assistant, text, true)
       } else if (!tracker.assistant) {
         feed.add('system', 'run completed (no text)')
       }
@@ -814,7 +930,7 @@ export class Controller {
     if (!this.session) return this.showMenu()
     this.screen = 'chat'
     this.emit()
-    await this.glasses.showChat({ body: this.feed().page(), status: this.statusLine() })
+    await this.glasses.showChat({ body: this.bodyText(), status: this.statusLine() })
   }
 
   private moveApprovalCursor(delta: number): void {
@@ -932,11 +1048,12 @@ export class Controller {
         return this.goToMenu()
       }
       case 'up': {
-        if (this.feed().scrollUp()) this.render()
+        if (this.smooth ? this.shiftWindow('up') : this.feed().scrollUp()) this.render()
         return
       }
       case 'down': {
-        this.feed().scrollDown()
+        if (this.smooth) this.shiftWindow('down')
+        else this.feed().scrollDown()
         this.render()
         return
       }

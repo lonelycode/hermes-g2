@@ -136,6 +136,43 @@ export class Feed {
     return this.anchor !== null
   }
 
+  releaseAnchor(): void {
+    this.anchor = null
+  }
+
+  /** Line index where the anchored entry starts, or null. */
+  anchorLine(): number | null {
+    if (!this.anchor) return null
+    let idx = 0
+    for (let i = 0; i < this.entries.length; i++) {
+      const e = this.entries[i]
+      const next = this.entries[i + 1]
+      const n = this.linesFor(e, i === 0, !next || TURN_KINDS.has(next.kind)).length
+      if (e === this.anchor) return idx + (i === 0 ? 0 : 1)
+      idx += n
+    }
+    return null
+  }
+
+  /**
+   * A run of consecutive lines starting at `start`, capped by a line count and a character
+   * budget (the glasses accept at most 2000 chars per text update). Used by smooth-scroll mode.
+   */
+  viewport(start: number, maxLines: number, maxChars: number): { text: string; start: number; end: number } {
+    const lines = this.lines()
+    const from = Math.max(0, Math.min(start, Math.max(0, lines.length - 1)))
+    const out: string[] = []
+    let chars = 0
+    let i = from
+    for (; i < lines.length && out.length < maxLines; i++) {
+      const cost = lines[i].length + 1
+      if (out.length && chars + cost > maxChars) break
+      out.push(lines[i])
+      chars += cost
+    }
+    return { text: out.join('\n'), start: from, end: i }
+  }
+
   /** Wrapped body lines without any tree decoration (cached per entry). */
   private bodyLines(entry: FeedEntry): string[] {
     let lines = this.cache.get(entry.id)

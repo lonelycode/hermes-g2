@@ -34,6 +34,8 @@ The directory has 12 entries. The only document is
 notes.md …
 ```
 
+Answers are revealed at a steady **typing speed** (default about 45 characters per second, word by word) rather than repainted on every model delta, which is easier on the eyes; set it to `off` to see raw streaming. **Scrolling** has two modes: `page` (default) redraws a page per swipe, with a page or half-page step; `smooth` (experimental) keeps a multi-page window in the container and lets the glasses scroll it natively one line per swipe with a scrollbar, swapping the window only at the edges.
+
 Turns are labelled (`▶ You:` / `■ Hermes:`) and flush-left; everything that happens in between (tool steps `○/●/×` running / done / failed, `·` commentary or system notes, `»` subagents, `?` approvals) hangs off the turn as a tree (`├` / `└`, continuation lines under `│`). When an answer starts, the page is anchored so its `■ Hermes:` line is the first thing on screen, and it stays there while the answer streams in; swipe to read on, which releases the anchor. The status bar animates (`●○○ → ○●○ → ○○●`) whenever something is in flight and names the state: connecting, thinking, the running tool, working (polling), waiting for approval, transcribing, sending. Only glyphs present in the G2 firmware font are used (see `scripts/check-glyphs.mjs`).
 
 Tool events carry raw JSON previews; the feed reduces each call to the tool name plus its one meaningful argument (command, query, path, url …) and hides results unless the call failed. The **Transcript detail** setting switches to `verbose` (argument and result previews, reasoning summaries) when you want more.

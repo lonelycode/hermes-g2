@@ -19,6 +19,11 @@ async function main(): Promise<void> {
   const bridge = await bridgeOrNull(6000)
   const store = makeSettingsStore(bridge ?? undefined)
   let settings: Settings = await loadSettings(store)
+  if (import.meta.env.DEV) {
+    // ?scroll=smooth|page lets simulator runs try a scroll mode without touching stored settings.
+    const scroll = new URLSearchParams(location.search).get('scroll')
+    if (scroll === 'smooth' || scroll === 'page') settings = { ...settings, scrollMode: scroll }
+  }
 
   let controller: Controller | null = null
   const companion = mountCompanion(root, settings, {
