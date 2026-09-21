@@ -1,0 +1,30 @@
+{
+  "package_id": "com.tyk.hermesg2",
+  "edition": "202601",
+  "name": "Hermes G2",
+  "version": "0.1.0",
+  "min_sdk_version": "0.0.15",
+  "entrypoint": "index.html",
+  "permissions": [
+    {
+      "name": "network",
+      "desc": "Talks to your self-hosted Hermes Agent gateway (or the bundled proxy) and your speech-to-text provider.",
+      "whitelist": [
+        "http://100.64.0.1:8642",
+        "http://100.64.0.1:8643",
+        "https://api.elevenlabs.io",
+        "https://api.openai.com",
+        "https://api.deepgram.com"
+      ]
+    },
+    {
+      "name": "g2-microphone",
+      "desc": "Captures your voice from the glasses mic array when you tap to talk."
+    },
+    {
+      "name": "phone-microphone",
+      "desc": "Optional fallback: capture your voice from the phone microphone instead of the glasses."
+    }
+  ],
+  "supported_languages": ["en"]
+}
