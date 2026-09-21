@@ -14,9 +14,9 @@ G2 mic ──PCM──▶ STT (proxy or provider) ──text──▶ Hermes /v1
 | Screen | Tap | Swipe up / down | Double-tap | Tap-then-hold (contextual menu) |
 |---|---|---|---|---|
 | **Sessions** (list) | open session / `+ New session` | move selection (firmware) | **exit app** (system confirm dialog) | New session · Reconnect |
-| **Chat**, idle | start listening | scroll transcript one page | back to sessions | Stop run · New session · Sessions · Reconnect |
+| **Chat**, idle | start listening | scroll transcript one page | back to sessions | New session · Sessions · Reconnect |
 | **Chat**, listening | stop & send (ignored if no audio) | – | cancel listening | |
-| **Chat**, run in progress | listen → send as **steer** | scroll (auto-follow resumes when you scroll past the end) | back to sessions (run keeps going) | Stop run |
+| **Chat**, run in progress or reply being typed | listen → send as **steer** | scroll (auto-follow resumes when you scroll past the end) | **stop**: interrupts the run and ends the reveal, keeping the text shown so far | Stop run |
 | **Approval** | confirm highlighted choice | move between choices | Deny | |
 
 The chat feed shows every interstitial step, not just the answer:

@@ -42,6 +42,8 @@ interface RunTracker {
   approvalIds: Set<string>
   /** Raw streamed answer text (typing mode reveals a prefix of it). */
   streamed?: string
+  /** The user stopped this run from the glasses. */
+  interrupted?: boolean
 }
 
 interface PendingApproval {
@@ -360,7 +362,7 @@ export class Controller {
     const tracker = this.session ? this.runs.get(this.session.id) : undefined
     if (this.pendingApprovals.has(this.session?.id ?? '')) return `? Approval needed · tap: review`
     if (this.session && this.typingFor(this.session.id) && (!tracker || TERMINAL_STATUSES.has(tracker.status))) {
-      return `${spin} replying… · ${where}tap: talk`
+      return `${spin} replying… · ${where}double: stop`
     }
     if (tracker && !TERMINAL_STATUSES.has(tracker.status)) {
       const state =
@@ -373,7 +375,7 @@ export class Controller {
               : tracker.link === 'polling'
                 ? 'working (polling)'
                 : 'thinking…'
-      return `${spin} ${state} · ${where}tap: steer`
+      return `${spin} ${state} · ${where}tap: steer · double: stop`
     }
     return `${where}tap: talk · ↑↓ scroll · double: menu`
   }
@@ -570,6 +572,39 @@ export class Controller {
       this.typeLoopRunning = false
     }
     if (this.screen === 'chat') this.render()
+  }
+
+  /**
+   * Double-tap while something is in flight: stop the run on the gateway and end the paced
+   * reveal, keeping whatever text is already on screen. Returns false when there was nothing
+   * to interrupt (the caller then treats the gesture as "back").
+   */
+  private interruptReply(): boolean {
+    const sessionId = this.session?.id
+    if (!sessionId) return false
+    const feed = this.feed(sessionId)
+    let did = false
+    const tracker = this.runs.get(sessionId)
+    if (tracker && !TERMINAL_STATUSES.has(tracker.status)) {
+      tracker.interrupted = true
+      did = true
+      this.log(`interrupting run ${tracker.runId}`)
+      this.client.stop(tracker.runId).catch(err => {
+        feed.add('error', `stop failed: ${(err as Error).message}`)
+        this.render(sessionId)
+      })
+    }
+    for (const [id, job] of this.typing) {
+      if (job.sessionId !== sessionId) continue
+      this.typing.delete(id)
+      if (job.entry.text !== job.target) feed.update(job.entry, { text: `${job.entry.text.trimEnd()} …` })
+      did = true
+    }
+    if (did) {
+      feed.add('system', 'interrupted')
+      this.render(sessionId)
+    }
+    return did
   }
 
   /** Is an answer still being revealed for this session? (keeps the status bar animating) */
@@ -930,8 +965,13 @@ export class Controller {
       }
     } else if (status === 'failed') {
       feed.add('error', `run failed: ${oneLine(error ?? 'unknown error', 200)}`)
-    } else {
+    } else if (!tracker.interrupted) {
       feed.add('system', `run ${status}`)
+    }
+    // A run that ended without completing leaves no more text to come: let any reveal finish.
+    if (status !== 'completed' && tracker.assistant) {
+      const job = this.typing.get(tracker.assistant.id)
+      if (job) job.done = true
     }
     this.pendingApprovals.delete(tracker.sessionId)
     tracker.assistant = undefined
@@ -1103,6 +1143,7 @@ export class Controller {
       }
       case 'double': {
         if (this.mode === 'listening') return this.cancelListening()
+        if (this.interruptReply()) return
         return this.goToMenu()
       }
       case 'up':
