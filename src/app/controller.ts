@@ -653,7 +653,10 @@ export class Controller {
     const verbose = this.settings.feedDetail === 'verbose'
     switch (ev.event) {
       case 'message.delta': {
-        if (!tracker.assistant) tracker.assistant = feed.add('assistant', '')
+        if (!tracker.assistant) {
+          tracker.assistant = feed.add('assistant', '')
+          this.anchorAnswer(feed, tracker.assistant)
+        }
         feed.append(tracker.assistant, ev.delta ?? '')
         break
       }
@@ -733,6 +736,11 @@ export class Controller {
     this.render(tracker.sessionId)
   }
 
+  /** Show a fresh answer from its first line, unless the user has scrolled away on their own. */
+  private anchorAnswer(feed: Feed, entry: FeedEntry): void {
+    if (feed.follow || feed.anchored) feed.anchorTo(entry)
+  }
+
   private finishRun(tracker: RunTracker, status: RunStatus['status'], output?: string, error?: string): void {
     tracker.status = status
     tracker.lastActivity = ''
@@ -741,7 +749,7 @@ export class Controller {
       const text = plainify(output ?? '')
       if (text) {
         if (tracker.assistant) feed.update(tracker.assistant, { text })
-        else feed.add('assistant', text)
+        else this.anchorAnswer(feed, feed.add('assistant', text))
       } else if (!tracker.assistant) {
         feed.add('system', 'run completed (no text)')
       }

@@ -41,8 +41,12 @@ export const PREFIX: Record<EntryKind, string> = {
 }
 export const PREFIX_TOOL_DONE = '● '
 export const PREFIX_TOOL_FAILED = '× '
-export const STEP_INDENT = '   '
-const STEP_INDENT_PX = 18
+// Tree connectors (all present in the firmware font): steps hang off the turn above them.
+export const STEP_BRANCH = ' ├ '
+export const STEP_LAST = ' └ '
+export const STEP_CONT = ' │ '
+export const STEP_CONT_LAST = '   '
+const STEP_INDENT_PX = 40
 const TURN_KINDS: ReadonlySet<EntryKind> = new Set(['user', 'assistant'])
 
 export interface FeedPosition {
@@ -59,6 +63,8 @@ export class Feed {
   private flat: string[] | null = null
   private offset = 0
   follow = true
+  /** Entry pinned to the top of the page (the latest answer) until the user scrolls. */
+  private anchor: FeedEntry | null = null
   private readonly width: number
   readonly pageLines: number
 
@@ -114,32 +120,56 @@ export class Feed {
     this.flat = null
     this.offset = 0
     this.follow = true
+    this.anchor = null
   }
 
-  private linesFor(entry: FeedEntry, first: boolean): string[] {
+  /** Pin `entry`'s first line to the top of the page (used for a fresh answer). */
+  anchorTo(entry: FeedEntry): void {
+    this.anchor = entry
+    this.follow = false
+    this.flat = null
+  }
+
+  get anchored(): boolean {
+    return this.anchor !== null
+  }
+
+  /** Wrapped body lines without any tree decoration (cached per entry). */
+  private bodyLines(entry: FeedEntry): string[] {
     let lines = this.cache.get(entry.id)
     if (!lines) {
       const prefix = entry.kind === 'tool' ? (entry.done ? (entry.failed ? PREFIX_TOOL_FAILED : PREFIX_TOOL_DONE) : PREFIX.tool) : PREFIX[entry.kind]
       const body = entry.text.trim() ? entry.text : entry.kind === 'assistant' ? '…' : ''
-      if (TURN_KINDS.has(entry.kind)) {
-        lines = wrapText(prefix + body, this.width)
-      } else {
-        // Hanging indent: every line of a step sits under the turn it belongs to.
-        lines = wrapText(prefix + body, this.width - STEP_INDENT_PX).map(l => STEP_INDENT + l)
-      }
+      lines = TURN_KINDS.has(entry.kind) ? wrapText(prefix + body, this.width) : wrapText(prefix + body, this.width - STEP_INDENT_PX)
       if (!lines.length) lines = [prefix.trim()]
       this.cache.set(entry.id, lines)
     }
-    // A blank separator ahead of each user turn keeps turns visually distinct.
-    return entry.kind === 'user' && !first ? ['', ...lines] : lines
+    return lines
+  }
+
+  private linesFor(entry: FeedEntry, first: boolean, lastStep: boolean): string[] {
+    const body = this.bodyLines(entry)
+    if (TURN_KINDS.has(entry.kind)) {
+      // A blank separator ahead of each turn keeps turns visually distinct.
+      return first ? body : ['', ...body]
+    }
+    // Steps hang off the turn above: ├ for intermediate steps, └ for the last one in the group.
+    return body.map((l, i) => (i === 0 ? (lastStep ? STEP_LAST : STEP_BRANCH) : lastStep ? STEP_CONT_LAST : STEP_CONT) + l)
   }
 
   lines(): string[] {
     if (this.flat) return this.flat
     const out: string[] = []
-    this.entries.forEach((e, i) => out.push(...this.linesFor(e, i === 0)))
+    let anchorIndex = -1
+    this.entries.forEach((e, i) => {
+      const next = this.entries[i + 1]
+      const lastStep = !next || TURN_KINDS.has(next.kind)
+      if (e === this.anchor) anchorIndex = out.length + (i === 0 ? 0 : 1) // skip the separator line
+      out.push(...this.linesFor(e, i === 0, lastStep))
+    })
     this.flat = out
-    if (this.follow) this.offset = this.maxOffset()
+    if (this.anchor && anchorIndex >= 0) this.offset = anchorIndex
+    else if (this.follow) this.offset = this.maxOffset()
     else this.offset = Math.min(this.offset, this.maxOffset())
     return out
   }
@@ -164,6 +194,7 @@ export class Feed {
 
   scrollUp(): boolean {
     this.lines()
+    this.anchor = null
     if (this.offset === 0) return false
     this.offset = Math.max(0, this.offset - Math.max(1, this.pageLines - 1))
     this.follow = false
@@ -172,8 +203,10 @@ export class Feed {
 
   scrollDown(): boolean {
     this.lines()
+    this.anchor = null
     const max = this.maxOffset()
     if (this.offset >= max) {
+      this.offset = max
       this.follow = true
       return false
     }
@@ -183,6 +216,7 @@ export class Feed {
   }
 
   jumpToEnd(): void {
+    this.anchor = null
     this.follow = true
     this.flat = null
     this.lines()
