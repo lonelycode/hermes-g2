@@ -44,47 +44,52 @@ export interface SettingsStore {
   set(key: string, value: string): Promise<void>
 }
 
-/** Storage backed by the Even bridge when available, else window.localStorage. */
+/**
+ * Storage backed by the Even bridge (sandboxed per plugin) when available. window.localStorage is
+ * used only when there is no bridge (simulator / plain browser): inside the Even app the WebView
+ * origin can be shared between a sideloaded dev page and an installed package, so falling back to
+ * it would leak one install's settings into another.
+ */
 export function makeSettingsStore(bridge?: {
   getLocalStorage(key: string): Promise<string>
   setLocalStorage(key: string, value: string): Promise<boolean>
 }): SettingsStore {
-  const local: SettingsStore = {
-    async get(key) {
-      try {
-        return window.localStorage.getItem(key)
-      } catch {
-        return null
-      }
-    },
-    async set(key, value) {
-      try {
-        window.localStorage.setItem(key, value)
-      } catch {
-        /* ignore */
-      }
-    },
+  if (!bridge) {
+    return {
+      async get(key) {
+        try {
+          return window.localStorage.getItem(key)
+        } catch {
+          return null
+        }
+      },
+      async set(key, value) {
+        try {
+          window.localStorage.setItem(key, value)
+        } catch {
+          /* ignore */
+        }
+      },
+    }
   }
-  if (!bridge) return local
   return {
     async get(key) {
       try {
         const v = await bridge.getLocalStorage(key)
-        if (typeof v === 'string' && v.length) return v
-      } catch {
-        /* fall through */
+        return typeof v === 'string' && v.length ? v : null
+      } catch (err) {
+        console.warn('[settings] bridge storage read failed', err)
+        return null
       }
-      return local.get(key)
     },
     async set(key, value) {
       let ok = false
       try {
         ok = !!(await bridge.setLocalStorage(key, value))
-      } catch {
-        ok = false
+      } catch (err) {
+        console.warn('[settings] bridge storage write failed', err)
       }
-      await local.set(key, value)
-      if (!ok) console.warn('[settings] bridge storage unavailable, used localStorage')
+      if (!ok) throw new Error('the Even app refused to store the settings')
     },
   }
 }
