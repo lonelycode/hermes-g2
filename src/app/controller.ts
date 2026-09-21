@@ -433,8 +433,11 @@ export class Controller {
       const d = to - from
       frames = [feed.pageAt(from + Math.round(d / 3)), feed.pageAt(from + Math.round((2 * d) / 3)), target].map(content => ({ content }))
     } else if (style === 'fade') {
+      // Dip the old page, bring the new one in dim, then ramp to full brightness.
       frames = [
-        { content: target, textColor: 1 },
+        { content: feed.pageAt(from), textColor: 1 },
+        { content: target, textColor: 2 },
+        { content: target, textColor: 3 },
         { content: target, textColor: 4 },
       ]
     } else if (style === 'blink') {
@@ -442,7 +445,7 @@ export class Controller {
     } else {
       frames = [{ content: target }]
     }
-    if (frames.length > 1) this.glasses.animateBody(frames, style === 'slide' ? 70 : 90)
+    if (frames.length > 1) this.glasses.animateBody(frames, style === 'fade' ? 130 : style === 'slide' ? 70 : 90)
     else this.glasses.updateBody(target)
     this.glasses.updateStatus(this.statusLine())
     this.syncSpinner()

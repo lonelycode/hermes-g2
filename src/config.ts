@@ -49,7 +49,7 @@ export const DEFAULT_SETTINGS: Settings = {
   feedDetail: 'compact',
   scrollStep: 'page',
   scrollMode: 'page',
-  pageTransition: 'slide',
+  pageTransition: 'fade',
   typingSpeed: 'normal',
   maxListenSeconds: 60,
   minAudioRms: 200,
@@ -124,7 +124,7 @@ export function normalizeSettings(raw: Partial<Settings> | null | undefined): Se
   if (!['compact', 'verbose'].includes(s.feedDetail)) s.feedDetail = 'compact'
   if (!['page', 'half'].includes(s.scrollStep)) s.scrollStep = 'page'
   if (!['page', 'smooth'].includes(s.scrollMode)) s.scrollMode = 'page'
-  if (!['none', 'slide', 'fade', 'blink'].includes(s.pageTransition)) s.pageTransition = 'slide'
+  if (!['none', 'slide', 'fade', 'blink'].includes(s.pageTransition)) s.pageTransition = 'fade'
   if (!['off', 'slow', 'normal', 'fast'].includes(s.typingSpeed)) s.typingSpeed = 'normal'
   s.maxListenSeconds = clamp(Number(s.maxListenSeconds) || 60, 5, 300)
   s.minAudioRms = clamp(Number(s.minAudioRms) || 200, 0, 10000)
