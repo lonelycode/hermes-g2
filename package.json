@@ -1,7 +1,7 @@
 {
   "name": "hermes-g2",
   "private": false,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Hermes Agent on Even Realities G2 glasses",
   "license": "AGPL-3.0-only",
