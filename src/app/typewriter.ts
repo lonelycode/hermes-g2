@@ -16,7 +16,7 @@ export function nextReveal(visible: string, target: string, chars: number): stri
   if (chars <= 0 || remaining <= chars + 12) return target
   let cut = visible.length + chars
   // Extend to the next whitespace (bounded) so words are revealed whole.
-  const boundary = target.slice(cut, cut + 24).search(/\s/)
+  const boundary = target.slice(cut, cut + 12).search(/\s/)
   if (boundary !== -1) cut += boundary
   return target.slice(0, cut)
 }

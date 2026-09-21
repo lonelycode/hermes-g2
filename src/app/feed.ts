@@ -213,7 +213,9 @@ export class Feed {
       out.push(...this.linesFor(e, i === 0, lastStep))
     })
     this.flat = out
-    if (this.anchor && anchorIndex >= 0) this.offset = anchorIndex
+    // Anchored: the answer starts at the top of the page until it overflows, then the page
+    // follows its last line (so a paced reveal scrolls line by line).
+    if (this.anchor && anchorIndex >= 0) this.offset = Math.max(anchorIndex, this.maxOffset())
     else if (this.follow) this.offset = this.maxOffset()
     else this.offset = Math.min(this.offset, this.maxOffset())
     return out

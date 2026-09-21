@@ -276,6 +276,22 @@ export class Glasses {
     if (this.layout === 'chat') this.schedule(IDS.body, content || ' ', 'body')
   }
 
+  /** Write the body immediately (no coalescing delay) and resolve once the bridge accepted it. */
+  updateBodyNow(content: string): Promise<void> {
+    if (this.layout !== 'chat') return Promise.resolve()
+    const text = clampUpgrade(content || ' ')
+    this.pending.delete(IDS.body.id)
+    this.desired.set(IDS.body.id, text)
+    this.animSeq++
+    this.mirror.body = content
+    this.events.onMirror?.('chat', this.mirror)
+    if (this.lastContent.get(IDS.body.id) === text) return this.flush()
+    this.lastContent.set(IDS.body.id, text)
+    return this.enqueue(() =>
+      this.bridge.textContainerUpgrade(new TextContainerUpgrade({ containerID: IDS.body.id, containerName: IDS.body.name, content: text })),
+    ).then(() => undefined)
+  }
+
   private animSeq = 0
 
   /**

@@ -104,7 +104,7 @@ export class Controller {
   private winEnd = 0
   /** Typing mode: full text received so far per answer entry; the entry shows a paced prefix. */
   private typing = new Map<number, { entry: FeedEntry; sessionId: string; target: string; done: boolean }>()
-  private typeTimer: number | null = null
+  private typeLoopRunning = false
   private listenStart = 0
   private listenTimer: number | null = null
   private tickTimer: number | null = null
@@ -387,7 +387,7 @@ export class Controller {
     const total = feed.lines().length
     let start = this.winStart.get(sessionId)
     const anchor = feed.anchorLine()
-    if (feed.anchored && anchor !== null) start = anchor
+    if (feed.anchored && anchor !== null) start = Math.max(anchor, total - BODY_LINES)
     else if (feed.follow || start === undefined) start = Math.max(0, total - BODY_LINES)
     start = Math.max(0, Math.min(start, Math.max(0, total - 1)))
     const view = feed.viewport(start, WINDOW_LINES, WINDOW_CHARS)
@@ -499,8 +499,7 @@ export class Controller {
     this.clearListenTimers()
     if (this.spinTimer !== null) window.clearInterval(this.spinTimer)
     this.spinTimer = null
-    if (this.typeTimer !== null) window.clearInterval(this.typeTimer)
-    this.typeTimer = null
+    this.typing.clear()
   }
 
   // ---- paced answer reveal ----------------------------------------------------------------------
@@ -520,24 +519,53 @@ export class Controller {
     job.target = text
     job.done = done
     this.typing.set(entry.id, job)
-    if (this.typeTimer === null) this.typeTimer = window.setInterval(() => this.typeTick(), 150)
+    void this.typeLoop()
   }
 
-  private typeTick(): void {
-    const perTick = Math.max(1, Math.round(this.typingCps() * 0.15))
-    for (const [id, job] of this.typing) {
-      const feed = this.feed(job.sessionId)
-      const next = nextReveal(job.entry.text, job.target, perTick)
-      if (next !== job.entry.text) feed.update(job.entry, { text: next })
-      if (job.entry.text === job.target) {
-        if (job.done) this.typing.delete(id)
+  /**
+   * Reveal loop paced by the display: each step advances by the characters the elapsed time is
+   * worth at the chosen speed, writes the page, and waits for the bridge to accept it before the
+   * next step. On slow BLE links that yields fewer, larger steps at the same average speed
+   * instead of a backlog that lands in lumps.
+   */
+  private async typeLoop(): Promise<void> {
+    if (this.typeLoopRunning) return
+    this.typeLoopRunning = true
+    const MIN_STEP_MS = 140
+    let last = Date.now() - MIN_STEP_MS
+    try {
+      while (this.typing.size && !this.stopped) {
+        const now = Date.now()
+        const dt = Math.min(1000, now - last)
+        last = now
+        const chars = Math.max(1, Math.round((this.typingCps() * dt) / 1000))
+        let visibleSession: string | null = null
+        for (const [id, job] of this.typing) {
+          const feed = this.feed(job.sessionId)
+          const next = nextReveal(job.entry.text, job.target, chars)
+          if (next !== job.entry.text) feed.update(job.entry, { text: next })
+          if (job.entry.text === job.target && job.done) this.typing.delete(id)
+          if (this.screen === 'chat' && this.session?.id === job.sessionId) visibleSession = job.sessionId
+          else this.emit()
+        }
+        if (visibleSession) {
+          this.glasses.updateStatus(this.statusLine())
+          this.syncSpinner()
+          this.emit()
+          await this.glasses.updateBodyNow(this.bodyText())
+        }
+        const elapsed = Date.now() - now
+        if (elapsed < MIN_STEP_MS) await sleep(MIN_STEP_MS - elapsed)
+        // Nothing left to reveal but the run is still streaming: idle until more text arrives.
+        while (this.typing.size && !this.stopped && [...this.typing.values()].every(j => j.entry.text === j.target)) {
+          await sleep(100)
+          last = Date.now() - MIN_STEP_MS
+        }
       }
-      this.render(job.sessionId)
+    } finally {
+      this.typeLoopRunning = false
     }
-    if (!this.typing.size && this.typeTimer !== null) {
-      window.clearInterval(this.typeTimer)
-      this.typeTimer = null
-    }
+    if (this.screen === 'chat') this.render()
   }
 
   /** Is an answer still being revealed for this session? (keeps the status bar animating) */
