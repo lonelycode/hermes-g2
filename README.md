@@ -122,7 +122,7 @@ cp .env.example .env.development.local   # optional dev-only defaults (VITE_HERM
 npm run dev                    # Vite on :5173
 ```
 
-**Simulator** (no hardware): `npm run mock` (fake Hermes on :8642, key `mock`) then `npm run simulate`. Say "approve" to trigger an approval, "slow" for a long run to steer or stop, "fail" for a failure. The simulator has no microphone; use `--aid` to pick an audio device, or drive it headlessly:
+**Simulator** (no hardware): `npm run mock` (fake Hermes on :8642, key `mock`) then `npm run simulate -- http://localhost:5173` (npm does not link the simulator's binary into `.bin`, so `npx evenhub-simulator` fails; the script calls it directly). Say "approve" to trigger an approval, "slow" for a long run to steer or stop, "fail" for a failure. The simulator has no microphone; use `--aid` to pick an audio device, or drive it headlessly:
 
 ```bash
 npx evenhub-simulator http://localhost:5173 --automation-port 9898

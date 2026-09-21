@@ -27,14 +27,15 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "pack": "npm run build && evenhub pack app.json dist -o hermes-g2.ehpk --sdk-ver 0.0.15",
-    "simulate": "evenhub-simulator http://localhost:5173",
+    "simulate": "node node_modules/@evenrealities/evenhub-simulator/bin/index.js",
     "qr": "evenhub qr --url",
     "proxy": "node proxy/cli.mjs run",
     "mock": "node scripts/mock-hermes.mjs",
     "icon": "node scripts/make-icon.mjs",
     "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
     "proxy:setup": "node proxy/cli.mjs setup",
-    "pack:check": "npm run build && evenhub pack app.json dist -o hermes-g2.ehpk --sdk-ver 0.0.15 -c"
+    "pack:check": "npm run build && evenhub pack app.json dist -o hermes-g2.ehpk --sdk-ver 0.0.15 -c",
+    "simulate:mock": "node node_modules/@evenrealities/evenhub-simulator/bin/index.js \"http://localhost:5173/?say=what%20changed%20today\""
   },
   "devDependencies": {
     "@evenrealities/even_hub_sdk": "^0.0.15",
