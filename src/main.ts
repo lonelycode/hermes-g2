@@ -72,6 +72,8 @@ async function main(): Promise<void> {
   }
   window.addEventListener('beforeunload', cleanup)
   window.addEventListener('pagehide', cleanup)
+  // Vite full reloads: release the mic and event streams before the new page boots.
+  import.meta.hot?.dispose(cleanup)
 
   await controller.start()
   console.log(READY_MARKER)
@@ -93,7 +95,7 @@ async function main(): Promise<void> {
 }
 
 main().catch(err => {
-  console.error('[hermes-g2] fatal', err)
+  console.error(`[hermes-g2] fatal: ${(err as Error)?.message ?? err}`)
   const root = document.querySelector<HTMLDivElement>('#app')
   if (root) root.textContent = `Fatal: ${(err as Error).message}`
 })

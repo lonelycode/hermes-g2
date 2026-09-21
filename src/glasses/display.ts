@@ -129,7 +129,7 @@ export class Glasses {
 
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
     const run = this.queue.then(fn, fn)
-    this.queue = run.catch(err => console.error('[glasses] bridge call failed', err))
+    this.queue = run.catch(err => console.error(`[glasses] bridge call failed: ${(err as Error)?.message ?? err}`))
     return run
   }
 
@@ -145,10 +145,16 @@ export class Glasses {
     for (const t of containers.textObject ?? []) this.lastContent.set(t.containerID!, t.content ?? '')
     if (!this.created) {
       const result = await this.bridge.createStartUpPageContainer(new CreateStartUpPageContainer(page))
-      if (result !== StartUpPageCreateResult.success) {
-        throw new Error(`createStartUpPageContainer failed: ${result}`)
+      if (result === StartUpPageCreateResult.success) {
+        this.created = true
+      } else {
+        // The host already has a page for this app (page reload during development, or the
+        // WebView was re-created while the glasses kept the old page): rebuild instead.
+        console.warn(`[glasses] createStartUpPageContainer returned ${result}; falling back to rebuild`)
+        const ok = await this.bridge.rebuildPageContainer(new RebuildPageContainer(page))
+        if (!ok) throw new Error(`createStartUpPageContainer failed (${result}) and rebuild failed`)
+        this.created = true
       }
-      this.created = true
     } else {
       const ok = await this.bridge.rebuildPageContainer(new RebuildPageContainer(page))
       if (!ok) throw new Error('rebuildPageContainer failed')
