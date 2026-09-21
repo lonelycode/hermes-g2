@@ -2,7 +2,8 @@
 // delta, the visible text grows by a fixed number of characters per tick, snapped to a word
 // boundary so half-words never flash on the glasses.
 
-export const TYPING_CPS: Record<string, number> = { off: 0, slow: 25, normal: 45, fast: 90 }
+// Characters per second. For reference, comfortable reading is roughly 20-25 cps.
+export const TYPING_CPS: Record<string, number> = { off: 0, slowest: 6, slow: 11, normal: 18, fast: 30 }
 
 /**
  * Advance `visible` toward `target` by about `chars` characters.

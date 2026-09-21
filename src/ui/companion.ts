@@ -26,7 +26,7 @@ const FIELDS: Array<{ key: keyof Settings; label: string; type?: string; hint?: 
   { key: 'sttModel', label: 'STT model override', hint: 'scribe_v1 · whisper-1 · nova-3' },
   { key: 'sttLanguage', label: 'Language code (blank = auto)', hint: 'en, de, …' },
   { key: 'micSource', label: 'Microphone', options: ['glasses', 'phone'] },
-  { key: 'typingSpeed', label: 'Typing speed', options: ['normal', 'slow', 'fast', 'off'], hint: 'Answers are revealed at a steady pace (slow ≈ 25, normal ≈ 45, fast ≈ 90 characters/s); off shows model output as it streams' },
+  { key: 'typingSpeed', label: 'Typing speed', options: ['normal', 'slow', 'slowest', 'fast', 'off'], hint: 'Answers are revealed at a steady pace (slowest ≈ 6, slow ≈ 11, normal ≈ 18, fast ≈ 30 characters/s); off shows model output as it streams' },
   { key: 'scrollMode', label: 'Scrolling', options: ['page', 'smooth'], hint: 'page: the app redraws a page per swipe · smooth (experimental): the glasses scroll a multi-page window themselves, one line per swipe' },
   { key: 'pageTransition', label: 'Page turn (page mode)', options: ['fade', 'none'], hint: 'fade: the old page dims and the new one ramps up to full brightness · none: instant' },
   { key: 'scrollStep', label: 'Swipe scrolls by (page mode)', options: ['page', 'half'], hint: 'page: 8 lines per swipe (fewer redraws) · half: 5 lines (more continuity)' },
