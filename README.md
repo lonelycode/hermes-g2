@@ -147,8 +147,8 @@ Simulator quirks worth knowing: its `/api/console` only flushes when bridge traf
 
    ```bash
    npx evenhub login                 # once; needed for the package_id check and uploads
-   npm run pack:check                # build → secret check → evenhub pack -c (package_id available?)
-   npm run pack                      # same without the check → hermes-g2.ehpk
+   npm run pack:check                # first time only: build → secret check → evenhub pack -c (is the package_id free?)
+   npm run pack                      # every later release (the id is yours now, so -c would report it "taken") → hermes-g2.ehpk
    ```
 3. **Private build** — dev portal → your project → *Private builds* → upload `hermes-g2.ehpk`; on the phone: Even Hub tab → *Me → Apps → Private builds* → Install. This is the first place the manifest, permissions prompts and whitelist are enforced for real.
 4. **Beta build** — assign the build to a beta group and re-test with the phone locked for five minutes (reviewers do exactly this).
