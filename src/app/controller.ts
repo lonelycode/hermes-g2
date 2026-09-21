@@ -416,7 +416,10 @@ export class Controller {
     }
     if (start <= 0) return false
     feed.follow = false
-    this.winStart.set(sessionId, Math.max(0, start - BODY_LINES))
+    // Going back has to be a page jump (the firmware shows the top of any new content); keep one
+    // line of overlap so the line being read stays on screen, and extend the window forward so
+    // reading down again is native.
+    this.winStart.set(sessionId, Math.max(0, start - (BODY_LINES - 1)))
     return true
   }
 
