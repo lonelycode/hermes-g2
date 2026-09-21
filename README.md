@@ -22,17 +22,17 @@ G2 mic ──PCM──▶ STT (proxy or provider) ──text──▶ Hermes /v1
 The chat feed shows every interstitial step, not just the answer:
 
 ```
-▶ what changed in the repo today
-· Let me look into that.
-● terminal 0.9s: ls -la ~/projects | head
-× web_search 0.5s: even realities g2 sdk
-→ HTTP 429 rate limited by provider
-» subagent: Summarise the directory listing
-» subagent completed: Twelve entries, one markdown note.
-The directory has 12 entries. The only document is notes.md …
+▶ You: what changed in the repo today
+   · Let me look into that.
+   ● terminal 0.9s: ls -la ~/projects | head
+   × web_search 0.5s: even realities g2 sdk
+   → HTTP 429 rate limited by provider
+   » subagent: Summarise the directory listing
+■ Hermes: The directory has 12 entries. The only
+document is notes.md …
 ```
 
-Prefixes: `▶` you · `○/●/×` tool running / done / failed · `·` commentary or system · `»` subagent · `?` approval · `×` error. Only glyphs present in the G2 firmware font are used (see `scripts/check-glyphs.mjs`).
+Turns are labelled (`▶ You:` / `■ Hermes:`) and flush-left; everything that happens in between (tool steps `○/●/×` running / done / failed, `·` commentary or system notes, `»` subagents, `?` approvals) is indented under the turn. The status bar animates (`●○○ → ○●○ → ○○●`) whenever something is in flight and names the state: connecting, thinking, the running tool, working (polling), waiting for approval, transcribing, sending. Only glyphs present in the G2 firmware font are used (see `scripts/check-glyphs.mjs`).
 
 Tool events carry raw JSON previews; the feed reduces each call to the tool name plus its one meaningful argument (command, query, path, url …) and hides results unless the call failed. The **Transcript detail** setting switches to `verbose` (argument and result previews, reasoning summaries) when you want more.
 

@@ -158,7 +158,12 @@ export class HermesClient {
    * Resolves normally on a clean close; rejects with HermesError on connection failure.
    * A missing CORS header on this endpoint surfaces as a `network` error before any event.
    */
-  async streamRunEvents(runId: string, onEvent: (event: RunEvent) => void, signal?: AbortSignal): Promise<void> {
+  async streamRunEvents(
+    runId: string,
+    onEvent: (event: RunEvent) => void,
+    signal?: AbortSignal,
+    onOpen?: () => void,
+  ): Promise<void> {
     let res: Response
     try {
       res = await this.fetchImpl(`${this.baseUrl}/v1/runs/${encodeURIComponent(runId)}/events`, {
@@ -172,6 +177,7 @@ export class HermesClient {
     }
     if (!res.ok) throw await this.httpError(res)
     if (!res.body) throw new HermesError('Event stream has no body', 'protocol', res.status)
+    onOpen?.()
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     const parser = new SseParser()

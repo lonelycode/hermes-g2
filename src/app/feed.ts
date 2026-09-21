@@ -26,9 +26,11 @@ export interface FeedEntry {
 }
 
 // Glyphs verified to exist in the firmware font tables (see scripts/check-glyphs.mjs).
+// Turns are labelled; everything that happens *between* turns (tool steps, commentary, system
+// notes) is indented under the user turn so the answer stands out as the next flush-left block.
 export const PREFIX: Record<EntryKind, string> = {
-  user: '▶ ',
-  assistant: '',
+  user: '▶ You: ',
+  assistant: '■ Hermes: ',
   tool: '○ ',
   interim: '· ',
   reasoning: '· ',
@@ -39,6 +41,9 @@ export const PREFIX: Record<EntryKind, string> = {
 }
 export const PREFIX_TOOL_DONE = '● '
 export const PREFIX_TOOL_FAILED = '× '
+export const STEP_INDENT = '   '
+const STEP_INDENT_PX = 18
+const TURN_KINDS: ReadonlySet<EntryKind> = new Set(['user', 'assistant'])
 
 export interface FeedPosition {
   page: number
@@ -116,7 +121,12 @@ export class Feed {
     if (!lines) {
       const prefix = entry.kind === 'tool' ? (entry.done ? (entry.failed ? PREFIX_TOOL_FAILED : PREFIX_TOOL_DONE) : PREFIX.tool) : PREFIX[entry.kind]
       const body = entry.text.trim() ? entry.text : entry.kind === 'assistant' ? '…' : ''
-      lines = wrapText(prefix + body, this.width)
+      if (TURN_KINDS.has(entry.kind)) {
+        lines = wrapText(prefix + body, this.width)
+      } else {
+        // Hanging indent: every line of a step sits under the turn it belongs to.
+        lines = wrapText(prefix + body, this.width - STEP_INDENT_PX).map(l => STEP_INDENT + l)
+      }
       if (!lines.length) lines = [prefix.trim()]
       this.cache.set(entry.id, lines)
     }

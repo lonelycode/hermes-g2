@@ -33,6 +33,8 @@ interface RunTracker {
   status: RunStatus['status']
   abort: AbortController
   streaming: boolean
+  /** 'connecting' until the SSE stream opens, then 'streaming'; 'polling' after a stream loss. */
+  link: 'connecting' | 'streaming' | 'polling'
   assistant?: FeedEntry
   lastActivity: string
   approvalIds: Set<string>
@@ -93,6 +95,8 @@ export class Controller {
   private listenStart = 0
   private listenTimer: number | null = null
   private tickTimer: number | null = null
+  private spinTimer: number | null = null
+  private spinFrame = 0
   private lastAudio: ControllerSnapshot['lastAudio'] = null
   private stopped = false
   private lastError = ''
@@ -157,7 +161,7 @@ export class Controller {
   async stop(): Promise<void> {
     if (this.stopped) return
     this.stopped = true
-    this.clearListenTimers()
+    this.clearAllTimers()
     try {
       await this.deps.bridge.audioControl(false)
     } catch {
@@ -189,6 +193,7 @@ export class Controller {
   private async showMenu(): Promise<void> {
     this.screen = 'menu'
     this.approval = null
+    this.syncSpinner()
     this.emit()
     let items: string[] = [NEW_SESSION_LABEL]
     let header = 'HERMES · sessions'
@@ -286,22 +291,60 @@ export class Controller {
     }
   }
 
+  /** Is anything in flight for the visible session (drives the status-bar animation)? */
+  private busy(): boolean {
+    if (this.mode === 'transcribing' || this.mode === 'sending' || this.mode === 'listening') return true
+    const tracker = this.session ? this.runs.get(this.session.id) : undefined
+    return !!tracker && !TERMINAL_STATUSES.has(tracker.status)
+  }
+
+  private spinner(): string {
+    const frames = ['●○○', '○●○', '○○●', '○●○']
+    return frames[this.spinFrame % frames.length]
+  }
+
+  /** Keep the status bar animating while something is in flight; stops itself when idle. */
+  private syncSpinner(): void {
+    const want = this.screen === 'chat' && this.busy()
+    if (want && this.spinTimer === null) {
+      this.spinTimer = window.setInterval(() => {
+        this.spinFrame++
+        if (this.screen === 'chat') this.glasses.updateStatus(this.statusLine())
+        if (!this.busy()) this.syncSpinner()
+      }, 500)
+    } else if (!want && this.spinTimer !== null) {
+      window.clearInterval(this.spinTimer)
+      this.spinTimer = null
+    }
+  }
+
   private statusLine(): string {
     const feed = this.feed()
     const pos = feed.position()
     const where = pos.pages > 1 ? `${pos.page}/${pos.pages}${pos.atEnd ? '' : '↓'} ` : ''
+    const spin = this.spinner()
     if (this.mode === 'listening') {
       const s = Math.floor((Date.now() - this.listenStart) / 1000)
-      const live = this.live ? (this.live.failed ? ' (no live preview)' : '') : ''
-      return `● Listening ${s}s${live} · tap: send · double: cancel`
+      const mic = this.spinFrame % 2 ? '●' : '○' // blinking record dot
+      const live = this.live ? (this.live.failed ? ' · no live preview' : '') : ''
+      return `${mic} Listening ${s}s${live} · tap: send · double: cancel`
     }
-    if (this.mode === 'transcribing') return `◌ Transcribing… ${where}`
-    if (this.mode === 'sending') return `◌ Sending… ${where}`
+    if (this.mode === 'transcribing') return `${spin} Transcribing… ${where}`
+    if (this.mode === 'sending') return `${spin} Sending to Hermes… ${where}`
     const tracker = this.session ? this.runs.get(this.session.id) : undefined
     if (this.pendingApprovals.has(this.session?.id ?? '')) return `? Approval needed · tap: review`
     if (tracker && !TERMINAL_STATUSES.has(tracker.status)) {
-      const act = tracker.lastActivity ? fitLine(tracker.lastActivity, 300) : 'thinking'
-      return `◌ ${act} · ${where}tap: steer`
+      const state =
+        tracker.status === 'waiting_for_approval'
+          ? 'waiting for approval'
+          : tracker.link === 'connecting'
+            ? 'connecting…'
+            : tracker.lastActivity
+              ? fitLine(tracker.lastActivity, 260)
+              : tracker.link === 'polling'
+                ? 'working (polling)'
+                : 'thinking…'
+      return `${spin} ${state} · ${where}tap: steer`
     }
     return `${where}tap: talk · ↑↓ scroll · double: menu`
   }
@@ -311,6 +354,7 @@ export class Controller {
     if (sessionId && sessionId !== this.session.id) return
     this.glasses.updateBody(this.feed().page())
     this.glasses.updateStatus(this.statusLine())
+    this.syncSpinner()
     this.emit()
   }
 
@@ -353,6 +397,13 @@ export class Controller {
     this.listenTimer = this.tickTimer = null
   }
 
+  /** Stop every timer (exit). */
+  private clearAllTimers(): void {
+    this.clearListenTimers()
+    if (this.spinTimer !== null) window.clearInterval(this.spinTimer)
+    this.spinTimer = null
+  }
+
   private async startListening(): Promise<void> {
     if (this.mode !== 'idle') return
     this.chunks = []
@@ -381,7 +432,6 @@ export class Controller {
       },
     })
     this.listenTimer = window.setTimeout(() => void this.stopAndSend(), this.settings.maxListenSeconds * 1000)
-    this.tickTimer = window.setInterval(() => this.render(), 1000)
     this.render()
   }
 
@@ -513,6 +563,7 @@ export class Controller {
         status: 'running',
         abort: new AbortController(),
         streaming: false,
+        link: 'connecting',
         lastActivity: '',
         approvalIds: new Set(),
       }
@@ -532,9 +583,19 @@ export class Controller {
   /** Stream events; if the stream drops before a terminal event, fall back to status polling. */
   private async follow(tracker: RunTracker): Promise<void> {
     tracker.streaming = true
+    tracker.link = 'connecting'
     this.emit()
+    this.render(tracker.sessionId)
     try {
-      await this.client.streamRunEvents(tracker.runId, ev => this.onRunEvent(tracker, ev), tracker.abort.signal)
+      await this.client.streamRunEvents(
+        tracker.runId,
+        ev => this.onRunEvent(tracker, ev),
+        tracker.abort.signal,
+        () => {
+          tracker.link = 'streaming'
+          this.render(tracker.sessionId)
+        },
+      )
     } catch (err) {
       this.log(`event stream failed for ${tracker.runId}: ${(err as Error).message}`)
       if (!TERMINAL_STATUSES.has(tracker.status)) {
@@ -543,9 +604,11 @@ export class Controller {
       }
     }
     tracker.streaming = false
+    tracker.link = 'polling'
     this.emit()
     this.log(`stream ended for ${tracker.runId} (status ${tracker.status})`)
     if (tracker.abort.signal.aborted || TERMINAL_STATUSES.has(tracker.status)) return
+    this.render(tracker.sessionId)
     await this.poll(tracker)
   }
 
@@ -727,6 +790,7 @@ export class Controller {
   private async presentApproval(pending: PendingApproval): Promise<void> {
     this.approval = { ...pending, cursor: 0 }
     this.screen = 'approval'
+    this.syncSpinner()
     this.emit()
     await this.glasses.showApproval(this.approvalTexts(this.approval))
   }
