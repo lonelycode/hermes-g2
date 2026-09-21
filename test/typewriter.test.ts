@@ -1,24 +1,37 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { nextReveal } from '../src/app/typewriter.ts'
+import { revealWords } from '../src/app/typewriter.ts'
 
-test('nextReveal grows by whole words and finishes cleanly', () => {
+test('revealWords spends a character budget on whole words', () => {
   const target = 'The directory has twelve entries and one markdown note from August.'
   let v = ''
-  const steps: string[] = []
-  for (let i = 0; i < 20 && v !== target; i++) {
-    v = nextReveal(v, target, 10)
-    steps.push(v)
+  let total = 0
+  let steps = 0
+  let budget = 0
+  while (v !== target && steps < 100) {
+    budget += 6 // what one step earns at 6 cps over a second
+    const r = revealWords(v, target, budget)
+    budget -= r.spent
+    v = r.text
+    total += r.spent
+    steps++
   }
   assert.equal(v, target)
-  for (const s of steps.slice(0, -1)) assert.ok(/\s$|[^\s]$/.test(s) && target.startsWith(s) && !/[a-z]$/i.test(s.slice(-1)) === false || target.startsWith(s))
-  assert.ok(steps.length >= 4 && steps.length < 12, `took ${steps.length} steps`)
-  assert.equal(steps[0], 'The directory') // 10 chars, extended to the word boundary
+  assert.equal(total, target.length)
+  // ~6 chars per step over 68 chars: at least 11 steps, never a burst.
+  assert.ok(steps >= 11, `only ${steps} steps`)
+  assert.equal(revealWords('', target, 6).text, 'The') // "The " + "directory" would exceed 6
+  assert.equal(revealWords('', target, 13).text, 'The directory')
 })
 
-test('nextReveal jumps when the target diverges or the tail is short', () => {
-  assert.equal(nextReveal('Hello wor', 'Goodbye', 5), 'Goodbye')
-  assert.equal(nextReveal('abc', 'abc def', 3), 'abc def')
-  assert.equal(nextReveal('same', 'same', 5), 'same')
-  assert.equal(nextReveal('', 'x'.repeat(100), 0), 'x'.repeat(100))
+test('revealWords never stalls on a long token and rewinds on divergence', () => {
+  const url = 'see https://example.com/a/very/long/path/that/never/ends ok'
+  const r = revealWords('see', url, 5)
+  assert.equal(r.text, 'see http') // partial reveal of a >14-char token
+  assert.equal(r.spent, 5)
+  const stalled = revealWords('see', url, 0.5)
+  assert.equal(stalled.text, 'see')
+  const rewound = revealWords('Hello **wor', 'Hello world', 3)
+  assert.equal(rewound.text, 'Hello ')
+  assert.equal(rewound.spent, 0)
 })

@@ -24,7 +24,7 @@ import { fitLine, oneLine, plainify, wrapText } from '../glasses/text.ts'
 import { Feed, type FeedEntry } from './feed.ts'
 import { looksLikeError, summarizeToolCall, summarizeToolResult } from './summaries.ts'
 import { cleanUserRow } from './history.ts'
-import { TYPING_CPS, nextReveal } from './typewriter.ts'
+import { TYPING_CPS, revealWords } from './typewriter.ts'
 
 export type Screen = 'boot' | 'error' | 'menu' | 'chat' | 'approval'
 export type ChatMode = 'idle' | 'listening' | 'transcribing' | 'sending'
@@ -103,7 +103,7 @@ export class Controller {
   private winStart = new Map<string, number>()
   private winEnd = 0
   /** Typing mode: full text received so far per answer entry; the entry shows a paced prefix. */
-  private typing = new Map<number, { entry: FeedEntry; sessionId: string; target: string; done: boolean }>()
+  private typing = new Map<number, { entry: FeedEntry; sessionId: string; target: string; done: boolean; budget: number }>()
   private typeLoopRunning = false
   private listenStart = 0
   private listenTimer: number | null = null
@@ -515,7 +515,7 @@ export class Controller {
       feed.update(entry, { text })
       return
     }
-    const job = this.typing.get(entry.id) ?? { entry, sessionId, target: '', done: false }
+    const job = this.typing.get(entry.id) ?? { entry, sessionId, target: '', done: false, budget: 0 }
     job.target = text
     job.done = done
     this.typing.set(entry.id, job)
@@ -538,12 +538,15 @@ export class Controller {
         const now = Date.now()
         const dt = Math.min(1000, now - last)
         last = now
-        const chars = Math.max(1, Math.round((this.typingCps() * dt) / 1000))
+        const earned = (this.typingCps() * dt) / 1000
         let visibleSession: string | null = null
         for (const [id, job] of this.typing) {
           const feed = this.feed(job.sessionId)
-          const next = nextReveal(job.entry.text, job.target, chars)
-          if (next !== job.entry.text) feed.update(job.entry, { text: next })
+          // Budget accrues at the chosen speed and is capped so a pause never turns into a burst.
+          job.budget = Math.min(job.budget + earned, Math.max(20, this.typingCps()))
+          const r = revealWords(job.entry.text, job.target, job.budget)
+          job.budget -= r.spent
+          if (r.text !== job.entry.text) feed.update(job.entry, { text: r.text })
           if (job.entry.text === job.target && job.done) this.typing.delete(id)
           if (this.screen === 'chat' && this.session?.id === job.sessionId) visibleSession = job.sessionId
           else this.emit()
@@ -825,7 +828,7 @@ export class Controller {
         }
         tracker.streamed = (tracker.streamed ?? '') + (ev.delta ?? '')
         tracker.lastActivity = 'replying'
-        this.setAnswerText(tracker.sessionId, tracker.assistant, tracker.streamed, false)
+        this.setAnswerText(tracker.sessionId, tracker.assistant, plainify(tracker.streamed), false)
         break
       }
       case 'message.interim': {
