@@ -21,3 +21,11 @@ test('no location line without a fix', () => {
   const text = buildInstructions({ now: new Date(), timeZone: 'UTC', lines: 9, charsPerLine: 52 })
   assert.doesNotMatch(text, /location/i)
 })
+
+test('chart instructions only when charts are on', () => {
+  const on = buildInstructions({ now: new Date(), timeZone: 'UTC', lines: 9, charsPerLine: 52, charts: true })
+  assert.match(on, /```g2chart\n\{"type":"bar"/)
+  assert.match(on, /exception is the chart block/)
+  const off = buildInstructions({ now: new Date(), timeZone: 'UTC', lines: 9, charsPerLine: 52 })
+  assert.doesNotMatch(off, /g2chart/)
+})

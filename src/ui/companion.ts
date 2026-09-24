@@ -15,6 +15,7 @@ export interface Companion {
   setBridgeState(text: string): void
   setSnapshot(snap: ControllerSnapshot): void
   setMirror(layout: string, containers: Record<string, string>): void
+  setChartImage(png: Uint8Array | null): void
   setWriteStats(stats: WriteStats): void
   log(line: string): void
 }
@@ -30,6 +31,7 @@ const FIELDS: Array<{ key: keyof Settings; label: string; type?: string; hint?: 
   { key: 'micSource', label: 'Microphone', options: ['glasses', 'phone'] },
   { key: 'launchInto', label: 'On launch', options: ['new', 'latest', 'menu'], hint: 'new: start a fresh session straight away · latest: reopen the most recent session · menu: show the session list' },
   { key: 'shareLocation', label: 'Share location with Hermes', options: ['on', 'off'], hint: "Each message tells the agent the local time, the glasses' display size and (when on) the phone's location fix" },
+  { key: 'charts', label: 'Charts', options: ['on', 'off'], hint: 'Let Hermes attach a small bar, line or gauge chart to a reply; it opens on the glasses after the answer (any gesture returns)' },
   { key: 'typingSpeed', label: 'Typing speed', options: ['normal', 'slow', 'slowest', 'fast', 'off'], hint: 'Answers are revealed at a steady pace (slowest ≈ 6, slow ≈ 11, normal ≈ 18, fast ≈ 30 characters/s); off shows model output as it streams' },
   { key: 'scrollMode', label: 'Scrolling', options: ['page', 'smooth'], hint: 'page: the app redraws a page per swipe · smooth (experimental): the glasses scroll a multi-page window themselves, one line per swipe' },
   { key: 'pageTransition', label: 'Page turn (page mode)', options: ['fade', 'none'], hint: 'fade: the old page dims and the new one ramps up to full brightness · none: instant' },
@@ -51,6 +53,7 @@ export function mountCompanion(root: HTMLElement, initial: Settings, cb: Compani
         <div class="row"><span id="screen" class="chip">boot</span><span id="run" class="chip chip-muted">no run</span><span id="audio" class="chip chip-muted">audio: –</span><span id="link" class="chip chip-muted">display: –</span></div>
         <div class="mirror-title">Glasses</div>
         <pre id="mirror" class="mirror">(nothing rendered yet)</pre>
+        <img id="chartImg" class="chart-img" alt="Chart on the glasses" hidden>
         <form id="sendForm" class="row">
           <input id="sendText" type="text" placeholder="Type a message instead of talking…" autocomplete="off" />
           <button id="sendBtn" type="submit" class="secondary">Send</button>
@@ -201,6 +204,8 @@ export function mountCompanion(root: HTMLElement, initial: Settings, cb: Compani
   const audioEl = root.querySelector<HTMLSpanElement>('#audio')!
   const linkEl = root.querySelector<HTMLSpanElement>('#link')!
   const mirrorEl = root.querySelector<HTMLPreElement>('#mirror')!
+  const chartEl = root.querySelector<HTMLImageElement>('#chartImg')!
+  let chartUrl: string | null = null
 
   return {
     setBridgeState(text) {
@@ -223,6 +228,12 @@ export function mountCompanion(root: HTMLElement, initial: Settings, cb: Compani
     setMirror(layout, containers) {
       mirrorEl.textContent = `[${layout}]\n` + Object.entries(containers).map(([k, v]) => `── ${k} ──\n${v}`).join('\n')
     },
+    setChartImage(png) {
+      if (chartUrl) URL.revokeObjectURL(chartUrl)
+      chartUrl = png ? URL.createObjectURL(new Blob([png as BlobPart], { type: 'image/png' })) : null
+      chartEl.hidden = !chartUrl
+      if (chartUrl) chartEl.src = chartUrl
+    },
     log,
   }
 }
@@ -239,6 +250,7 @@ function injectStyles(): void {
     .chip-ok { color: #3CFA44; border-color: #3CFA44; background: rgba(60,250,68,.08); }
     .chip-live { color: #FFD60A; border-color: #FFD60A; background: rgba(255,214,10,.08); }
     .chip-muted { color: #A7A7A7; }
+    .chart-img { display: block; width: 100%; max-width: 576px; margin: 6px 0 0; border-radius: 8px; background: #000; filter: sepia(1) hue-rotate(60deg) saturate(4); }
     .mirror-title { margin-top: 12px; font-size: 12px; color: #7B7B7B; }
     .mirror { background: #000; color: #3CFA44; border-radius: 8px; padding: 12px; font: 13px/1.4 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-word; min-height: 120px; margin: 4px 0 0; }
     .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; font-size: 13px; }

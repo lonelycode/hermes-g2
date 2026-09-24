@@ -3,6 +3,9 @@
 
 import {
   CreateStartUpPageContainer,
+  ImageContainerProperty,
+  ImageRawDataUpdate,
+  ImageRawDataUpdateResult,
   ListContainerProperty,
   ListItemContainerProperty,
   RebuildPageContainer,
@@ -13,6 +16,7 @@ import {
   type MenuContainerProperty,
 } from '@evenrealities/even_hub_sdk'
 import { CANVAS_H, CANVAS_W, LINE_HEIGHT } from './text.ts'
+import { CHART_TILES, CHART_W, TILE_H, TILE_W } from './chart.ts'
 
 export const PAD = 4
 export const BODY_H = 252
@@ -28,8 +32,11 @@ export const APPROVAL_BODY_LINES = Math.floor((APPROVAL_BODY_H - 2 * PAD) / LINE
 export const LIST_HEADER_H = 30
 export const MAX_LIST_ITEMS = 20
 export const MAX_LIST_ITEM_CHARS = 64
+export const CHART_TITLE_H = 34
+export const CHART_Y = 40
+export const CHART_CAPTION_Y = CHART_Y + TILE_H + 4
 
-export type LayoutName = 'message' | 'chat' | 'list' | 'approval'
+export type LayoutName = 'message' | 'chat' | 'list' | 'approval' | 'chart' | 'hidden'
 
 const IDS = {
   message: { id: 1, name: 'msg' },
@@ -39,13 +46,22 @@ const IDS = {
   list: { id: 5, name: 'sessions' },
   apBody: { id: 6, name: 'apbody' },
   apChoice: { id: 7, name: 'apchoice' },
+  chartTitle: { id: 8, name: 'ctitle' },
+  chartCaption: { id: 9, name: 'ccaption' },
+  chartStatus: { id: 10, name: 'cstatus' },
+  hidden: { id: 13, name: 'hidden' },
 } as const
+const CHART_IMAGE_IDS = [
+  { id: 11, name: 'cimg0' },
+  { id: 12, name: 'cimg1' },
+] as const
 
 export const MENU_ITEMS = {
   STOP_RUN: 1,
   NEW_SESSION: 2,
   SESSIONS: 3,
   RECONNECT: 4,
+  LAST_CHART: 5,
 } as const
 
 export const MENU_OBJECT: MenuContainerProperty = {
@@ -54,6 +70,7 @@ export const MENU_OBJECT: MenuContainerProperty = {
     { itemName: 'New session', itemID: MENU_ITEMS.NEW_SESSION },
     { itemName: 'Sessions', itemID: MENU_ITEMS.SESSIONS },
     { itemName: 'Reconnect', itemID: MENU_ITEMS.RECONNECT },
+    { itemName: 'Last chart', itemID: MENU_ITEMS.LAST_CHART },
   ],
 } as MenuContainerProperty
 
@@ -104,9 +121,20 @@ export interface ApprovalPage {
   body: string
   choices: string
 }
+export interface ChartPage {
+  title: string
+  caption: string
+  status: string
+  /** PNG bytes per image tile, left to right (see ./chart.ts). */
+  tiles: Uint8Array[]
+  /** The whole chart as one PNG, for the companion page's mirror. */
+  preview?: Uint8Array
+}
 
 export interface GlassesEvents {
   onMirror?(layout: LayoutName, containers: Record<string, string>): void
+  /** The chart on the glasses as a PNG, or null once another layout replaces it. */
+  onChartImage?(png: Uint8Array | null): void
   /** Bridge write timing, for diagnosing a saturated BLE link. */
   onWriteStats?(stats: WriteStats): void
 }
@@ -178,10 +206,10 @@ export class Glasses {
 
   private async buildPage(
     layout: LayoutName,
-    containers: { textObject?: TextContainerProperty[]; listObject?: ListContainerProperty[] },
+    containers: { textObject?: TextContainerProperty[]; listObject?: ListContainerProperty[]; imageObject?: ImageContainerProperty[] },
     menu: MenuContainerProperty | undefined,
   ): Promise<void> {
-    const total = (containers.textObject?.length ?? 0) + (containers.listObject?.length ?? 0)
+    const total = (containers.textObject?.length ?? 0) + (containers.listObject?.length ?? 0) + (containers.imageObject?.length ?? 0)
     const page = { containerTotalNum: total, ...containers, ...(menu ? { menuObject: menu } : {}) }
     this.pending.clear()
     this.lastContent.clear()
@@ -209,6 +237,7 @@ export class Glasses {
   private setMirror(layout: LayoutName, containers: Record<string, string>): void {
     this.mirror = { ...containers }
     this.events.onMirror?.(layout, this.mirror)
+    if (layout !== 'chart') this.events.onChartImage?.(null)
   }
 
   /** Full-screen text page for startup / errors. Tap-capable. */
@@ -220,6 +249,17 @@ export class Glasses {
         menu,
       )
       this.setMirror('message', { message: content })
+    })
+  }
+
+  /**
+   * Blank the display while the app keeps running (there is no "hide" call in the SDK, and black
+   * is transparent on the lens). One empty text container keeps receiving gestures.
+   */
+  showBlank(menu: MenuContainerProperty = MENU_OBJECT): Promise<void> {
+    return this.enqueue(async () => {
+      await this.buildPage('hidden', { textObject: [text(IDS.hidden, 0, 0, CANVAS_W, CANVAS_H, ' ', true)] }, menu)
+      this.setMirror('hidden', {})
     })
   }
 
@@ -281,6 +321,51 @@ export class Glasses {
         menu,
       )
       this.setMirror('approval', { body: page.body, choices: page.choices })
+    })
+  }
+
+  /**
+   * Full-screen chart: title, the chart as image tiles, caption, status. Image containers start
+   * empty, so the tiles are sent right after the page is built (one BLE upload each).
+   */
+  showChart(page: ChartPage, menu: MenuContainerProperty = MENU_OBJECT): Promise<void> {
+    const tiles = page.tiles.slice(0, CHART_TILES)
+    const left = Math.round((CANVAS_W - CHART_W) / 2)
+    const images = tiles.map(
+      (_t, i) =>
+        new ImageContainerProperty({
+          xPosition: left + i * TILE_W,
+          yPosition: CHART_Y,
+          width: TILE_W,
+          height: TILE_H,
+          containerID: CHART_IMAGE_IDS[i].id,
+          containerName: CHART_IMAGE_IDS[i].name,
+        }),
+    )
+    return this.enqueue(async () => {
+      await this.buildPage(
+        'chart',
+        {
+          textObject: [
+            text(IDS.chartTitle, 0, 0, CANVAS_W, CHART_TITLE_H, page.title, true),
+            text(IDS.chartCaption, 0, CHART_CAPTION_Y, CANVAS_W, STATUS_Y - CHART_CAPTION_Y, page.caption || ' ', false),
+            text(IDS.chartStatus, 0, STATUS_Y, CANVAS_W, STATUS_H, page.status, false, { textColor: 3 }),
+          ],
+          imageObject: images,
+        },
+        menu,
+      )
+      this.setMirror('chart', { title: page.title, caption: page.caption, status: page.status })
+      if (page.preview) this.events.onChartImage?.(page.preview)
+      for (let i = 0; i < tiles.length; i++) {
+        const t0 = Date.now()
+        const result = await this.bridge.updateImageRawData(
+          new ImageRawDataUpdate({ containerID: CHART_IMAGE_IDS[i].id, containerName: CHART_IMAGE_IDS[i].name, imageData: tiles[i] }),
+        )
+        const ms = Date.now() - t0
+        if (!ImageRawDataUpdateResult.isSuccess(result)) console.warn(`[glasses] chart tile ${i} failed: ${result} (${ms}ms, ${tiles[i].byteLength} B)`)
+        else console.log(`[glasses] chart tile ${i}: ${ms}ms, ${tiles[i].byteLength} B`)
+      }
     })
   }
 

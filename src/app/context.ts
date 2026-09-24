@@ -17,16 +17,27 @@ export interface ContextInput {
   lines: number
   charsPerLine: number
   location?: LocationFix | null
+  /** Tell the agent it may attach a g2chart block. */
+  charts?: boolean
 }
 
 export function buildInstructions(c: ContextInput): string {
   const parts = [
-    `The user is talking to you by voice through Even Realities G2 smart glasses. Your reply appears on a small monochrome heads-up display that shows ${c.lines} lines of about ${c.charsPerLine} characters at a time; they can scroll, but every extra screen costs effort. Keep replies short and glanceable: lead with the answer, use a few short sentences or a compact list, and use plain text only (markdown, tables, links and images do not render). Their messages are speech-to-text transcripts and may contain recognition errors.`,
+    `The user is talking to you by voice through Even Realities G2 smart glasses. Your reply appears on a small monochrome heads-up display that shows ${c.lines} lines of about ${c.charsPerLine} characters at a time; they can scroll, but every extra screen costs effort. Keep replies short and glanceable: lead with the answer, use a few short sentences or a compact list, and use plain text only (markdown, tables, links and images do not render${c.charts ? '; the one exception is the chart block below' : ''}). Their messages are speech-to-text transcripts and may contain recognition errors.`,
     `Current local time: ${formatTime(c.now, c.timeZone)}.`,
   ]
+  if (c.charts) parts.push(CHART_INSTRUCTIONS)
   if (c.location) parts.push(`User's approximate location: ${formatLocation(c.location, c.now)}.`)
   return parts.join('\n')
 }
+
+const CHART_INSTRUCTIONS = [
+  'When a small chart makes numbers clearer (a trend, a comparison, progress toward a target), you may end the reply with one chart block; the glasses draw it after the text. Format, exactly:',
+  '```g2chart',
+  '{"type":"bar","title":"Steps this week","labels":["Mon","Tue","Wed"],"values":[8200,9100,7600],"unit":"steps","caption":"Best day: Tue"}',
+  '```',
+  'type is "bar" (up to 12 values, labels of at most 6 characters), "line" (up to 60 values; labels optional, only the first and last are shown) or "gauge" (one value, with "min" and "max"). "title" is required and short; "unit" and "caption" are optional. Valid JSON only, at most one block, and always state the key takeaway in the text as well. Do not add a chart when the answer is not about numbers.',
+].join('\n')
 
 function formatTime(now: Date, timeZone?: string): string {
   const opts: Intl.DateTimeFormatOptions = {

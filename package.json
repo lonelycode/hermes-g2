@@ -35,7 +35,8 @@
     "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
     "proxy:setup": "node proxy/cli.mjs setup",
     "pack:check": "npm run build && evenhub pack app.json dist -o hermes-g2.ehpk --sdk-ver 0.0.15 -c",
-    "simulate:mock": "node node_modules/@evenrealities/evenhub-simulator/bin/index.js \"http://localhost:5173/?say=what%20changed%20today\""
+    "simulate:mock": "node node_modules/@evenrealities/evenhub-simulator/bin/index.js \"http://localhost:5173/?say=what%20changed%20today\"",
+    "simulate:chart": "node node_modules/@evenrealities/evenhub-simulator/bin/index.js \"http://localhost:5173/?say=show%20me%20a%20chart%20of%20my%20steps\""
   },
   "devDependencies": {
     "@evenrealities/even_hub_sdk": "^0.0.15",

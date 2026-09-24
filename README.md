@@ -14,10 +14,13 @@ G2 mic ──PCM──▶ STT (proxy or provider) ──text──▶ Hermes /v1
 | Screen | Tap | Swipe up / down | Double-tap | Tap-then-hold (contextual menu) |
 |---|---|---|---|---|
 | **Sessions** (list) | open session / `+ New session` | move selection (firmware) | **exit app** (system confirm dialog) | New session · Reconnect |
-| **Chat**, idle | start listening | scroll transcript one page | back to sessions | New session · Sessions · Reconnect |
+| **Chat**, idle | start listening | scroll transcript one page | back to sessions | New session · Sessions · Reconnect · Last chart |
 | **Chat**, listening | stop & send (ignored if no audio) | – | cancel listening | |
 | **Chat**, run in progress or reply being typed | listen → send as **steer** | scroll (auto-follow resumes when you scroll past the end) | **stop**: interrupts the run and ends the reveal, keeping the text shown so far | Stop run |
 | **Approval** | confirm highlighted choice | move between choices | Deny | |
+| **Chart** | back to chat | back to chat | back to chat | |
+
+**Long press** (press and hold, on any screen but an approval) **hides the app**: the display goes blank while the app keeps running, so a run in progress carries on and its answer is waiting when you come back. Any gesture brings the display back where you left it; an approval request brings it back on its own. (The SDK has no background/hide call, and exiting would drop the session, so hiding is a blank page; black is transparent on the lens.)
 
 The chat feed shows every interstitial step, not just the answer:
 
@@ -43,6 +46,16 @@ By default (**Tool calls**: `collapsed`) a turn's tool calls fold into a single 
 On launch the app drops straight into a fresh session (**On launch**: `new`); `latest` reopens the most recent session and `menu` shows the session list. A new session is only created on the gateway when you send the first message, so opening the app without talking leaves nothing behind.
 
 Every run carries short context as the run's `instructions` (Hermes applies it as an ephemeral system prompt; it is not stored in the session): that the user is on G2 glasses with a 9-line × ~60-character plain-text display and speech-to-text input, the local date, time and zone, and — with **Share location** on (default) — the phone's location fix (requires the `location` permission).
+
+**Charts** (on by default): the run instructions also tell the agent it may end a reply with one fenced `g2chart` block, e.g.
+
+````
+```g2chart
+{"type":"bar","title":"Steps this week","labels":["Mon","Tue"],"values":[8200,9100],"unit":"steps","caption":"Best day: Tue"}
+```
+````
+
+`type` is `bar` (≤12 values), `line` (≤60) or `gauge` (one value with `min`/`max`). The app cuts the block out of the answer (a `[chart] Title` line stays in the transcript; a block still streaming is never shown), draws it on the phone and sends it to the glasses as two 288×144 PNG tiles (the firmware's image-container limit) under a title and caption. The chart opens by itself once the answer has finished revealing; any gesture returns to the chat and **Last chart** in the context menu reopens it. Set **Charts** to `off` to stop asking for them. With the mock gateway, say "chart", "trend" or "gauge" (`npm run simulate:chart`).
 
 Tool events carry raw JSON previews; the feed reduces each call to the tool name plus its one meaningful argument (command, query, path, url …) and hides results unless the call failed. The **Transcript detail** setting switches to `verbose` (argument and result previews, reasoning summaries) when you want more.
 

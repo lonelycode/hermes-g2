@@ -50,6 +50,7 @@ async function main(): Promise<void> {
 
   const glasses = new Glasses(bridge, {
     onMirror: (layout, c) => companion.setMirror(layout, c),
+    onChartImage: png => companion.setChartImage(png),
     onWriteStats: st => companion.setWriteStats(st),
   })
   controller = new Controller({

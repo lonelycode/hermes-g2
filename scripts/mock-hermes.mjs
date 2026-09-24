@@ -73,6 +73,7 @@ async function executeRun(run, input) {
   run.status = 'running'
   const lower = input.toLowerCase()
   if (lower.includes('demo') || lower.includes('repo today')) return demoRun(run, input)
+  if (lower.includes('chart') || lower.includes('gauge') || lower.includes('trend')) return chartRun(run, lower)
   await sleep(300)
   pushEvent(run, 'message.interim', { text: 'Let me look into that.', already_streamed: false })
   await sleep(400)
@@ -152,6 +153,39 @@ async function demoRun(run, input) {
   await sleep(300)
   const answer = 'Three commits landed today, all on main:\n\n1. Live transcription now streams while you talk.\n2. Tool calls are summarised to one line each.\n3. Page turns fade so the eye can re-anchor.\n\nNothing is waiting for review and the build is green.'
   for (const word of answer.split(/(?<=\s)/)) {
+    if (run.stopped) return finish(run, 'cancelled')
+    pushEvent(run, 'message.delta', { delta: word })
+    await sleep(35)
+  }
+  return finish(run, 'completed', answer)
+}
+
+// A reply with a g2chart block: "chart" (bar), "trend" (line), "gauge". Streamed word by word so
+// the client has to hide the block while it is still arriving.
+const CHARTS = {
+  bar: {
+    text: 'You walked 58,400 steps this week. Thursday was the best day and Sunday the quietest.',
+    spec: { type: 'bar', title: 'Steps this week', labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], values: [8200, 9100, 7600, 11800, 8900, 7400, 5400], unit: 'steps', caption: 'Best day: Thu · average 8.3k' },
+  },
+  line: {
+    text: 'Your resting heart rate drifted down over the month, from 64 to 58 bpm.',
+    spec: { type: 'line', title: 'Resting heart rate', labels: ['Aug 26', '', '', '', '', '', '', '', '', '', '', '', '', '', 'Sep 24'], values: [64, 63, 64, 62, 62, 61, 62, 60, 60, 61, 59, 59, 58, 59, 58], unit: 'bpm', caption: '30 days · down 6 bpm' },
+  },
+  gauge: {
+    text: 'The monthly API budget is 72% used with a week to go.',
+    spec: { type: 'gauge', title: 'API budget used', values: [72], min: 0, max: 100, unit: '%', caption: '$720 of $1,000 · resets Oct 1' },
+  },
+}
+
+async function chartRun(run, lower) {
+  const kind = lower.includes('gauge') ? 'gauge' : lower.includes('trend') ? 'line' : 'bar'
+  const { text, spec } = CHARTS[kind]
+  await sleep(300)
+  pushEvent(run, 'tool.started', { tool: 'health_query', preview: JSON.stringify({ range: '7d' }) })
+  await sleep(600)
+  pushEvent(run, 'tool.completed', { tool: 'health_query', duration: 0.6, error: false, preview: JSON.stringify({ rows: spec.values.length }) })
+  const answer = `${text}\n\n\`\`\`g2chart\n${JSON.stringify(spec)}\n\`\`\``
+  for (const word of answer.split(/(?<=[\s,:])/)) {
     if (run.stopped) return finish(run, 'cancelled')
     pushEvent(run, 'message.delta', { delta: word })
     await sleep(35)

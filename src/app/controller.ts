@@ -21,13 +21,15 @@ import { concatChunks, pcmStats } from '../stt/wav.ts'
 import { APPROVAL_BODY_LINES, BODY_LINES, Glasses, INNER_W, MENU_ITEMS, MENU_OBJECT } from '../glasses/display.ts'
 import type { Gesture } from '../glasses/input.ts'
 import { approxCharsPerLine, fitLine, oneLine, plainify, wrapText } from '../glasses/text.ts'
+import { renderChart } from '../glasses/chart.ts'
+import { extractCharts, type ChartSpec } from './charts.ts'
 import { Feed, type FeedEntry } from './feed.ts'
 import { looksLikeError, summarizeToolCall, summarizeToolResult } from './summaries.ts'
 import { buildInstructions, type LocationFix } from './context.ts'
 import { cleanUserRow } from './history.ts'
 import { TYPING_CPS, revealWords } from './typewriter.ts'
 
-export type Screen = 'boot' | 'error' | 'menu' | 'chat' | 'approval'
+export type Screen = 'boot' | 'error' | 'menu' | 'chat' | 'approval' | 'chart' | 'hidden'
 export type ChatMode = 'idle' | 'listening' | 'transcribing' | 'sending'
 
 interface RunTracker {
@@ -45,6 +47,8 @@ interface RunTracker {
   streamed?: string
   /** The user stopped this run from the glasses. */
   interrupted?: boolean
+  /** Chart attached to this run's answer (a g2chart block). */
+  chart?: ChartSpec
 }
 
 interface PendingApproval {
@@ -125,6 +129,12 @@ export class Controller {
   private location: LocationFix | null = null
   private locationAt = 0
   private locating: Promise<void> | null = null
+  /** Latest chart per session (reopened from the "Last chart" menu item). */
+  private lastChart = new Map<string, ChartSpec>()
+  /** Chart to open once its answer has finished revealing, per session. */
+  private chartDue = new Map<string, ChartSpec>()
+  /** Where a long press hid the app from (the screen to bring back). */
+  private hiddenFrom: Screen = 'chat'
 
   constructor(private readonly deps: ControllerDeps) {
     this.settings = deps.settings
@@ -340,7 +350,14 @@ export class Controller {
     } catch {
       /* device offset only */
     }
-    return buildInstructions({ now: new Date(), timeZone, lines: BODY_LINES, charsPerLine: approxCharsPerLine(INNER_W), location })
+    return buildInstructions({
+      now: new Date(),
+      timeZone,
+      lines: BODY_LINES,
+      charsPerLine: approxCharsPerLine(INNER_W),
+      location,
+      charts: this.settings.charts === 'on',
+    })
   }
 
   private async openSession(index: number): Promise<void> {
@@ -372,7 +389,7 @@ export class Controller {
       await this.glasses.showChat({ body: 'Loading history…', status: this.statusLine() })
       try {
         const messages = await this.client.getMessages(session.id, 60)
-        this.loadHistory(feed, messages)
+        this.loadHistory(feed, messages, session.id)
       } catch (err) {
         feed.add('error', `history unavailable: ${(err as Error).message}`)
       }
@@ -386,7 +403,7 @@ export class Controller {
     if (pending) await this.presentApproval(pending)
   }
 
-  private loadHistory(feed: Feed, messages: HermesMessage[]): void {
+  private loadHistory(feed: Feed, messages: HermesMessage[], sessionId: string): void {
     for (const m of messages) {
       const content = messageText(m)
       if (m.role === 'user') {
@@ -399,7 +416,7 @@ export class Controller {
           const name = call.function?.name ?? 'tool'
           feed.add('tool', summarizeToolCall(name, call.function?.arguments), { tool: name, done: true })
         }
-        if (content) feed.add('assistant', plainify(content))
+        if (content) feed.add('assistant', this.answerText(sessionId, content))
       }
     }
   }
@@ -470,7 +487,7 @@ export class Controller {
                 : 'thinking…'
       return `${spin} ${state} · ${where}tap: steer · double: stop`
     }
-    return `${where}tap: talk · ↑↓ scroll · double: menu`
+    return `${where}tap: talk · ↑↓ scroll · double: menu · hold: hide`
   }
 
   private get smooth(): boolean {
@@ -638,6 +655,7 @@ export class Controller {
         last = now
         const earned = (this.typingCps() * dt) / 1000
         let visibleSession: string | null = null
+        const revealed: string[] = []
         for (const [id, job] of this.typing) {
           const feed = this.feed(job.sessionId)
           // Budget accrues at the chosen speed and is capped so a pause never turns into a burst.
@@ -645,7 +663,10 @@ export class Controller {
           const r = revealWords(job.entry.text, job.target, job.budget)
           job.budget -= r.spent
           if (r.text !== job.entry.text) feed.update(job.entry, { text: r.text })
-          if (job.entry.text === job.target && job.done) this.typing.delete(id)
+          if (job.entry.text === job.target && job.done) {
+            this.typing.delete(id)
+            revealed.push(job.sessionId)
+          }
           if (this.screen === 'chat' && this.session?.id === job.sessionId) visibleSession = job.sessionId
           else this.emit()
         }
@@ -653,10 +674,11 @@ export class Controller {
           this.emit()
           await this.glasses.updateBodyNow(this.bodyText())
         }
+        for (const sessionId of revealed) void this.openDueChart(sessionId)
         const elapsed = Date.now() - now
         if (elapsed < MIN_STEP_MS) await sleep(MIN_STEP_MS - elapsed)
         // Nothing left to reveal but the run is still streaming: idle until more text arrives.
-        while (this.typing.size && !this.stopped && [...this.typing.values()].every(j => j.entry.text === j.target)) {
+        while (this.typing.size && !this.stopped && [...this.typing.values()].every(j => j.entry.text === j.target && !j.done)) {
           await sleep(100)
           last = Date.now() - MIN_STEP_MS
         }
@@ -829,6 +851,8 @@ export class Controller {
       else await this.enterChat(this.session, true)
     }
     if (this.screen === 'approval') return
+    if (this.screen === 'chart') await this.closeChart()
+    if (this.screen === 'hidden') await this.wake()
     if (this.mode === 'listening') await this.cancelListening()
     if (this.mode !== 'idle') return
     this.log(`typed: ${clean}`)
@@ -958,7 +982,7 @@ export class Controller {
         }
         tracker.streamed = (tracker.streamed ?? '') + (ev.delta ?? '')
         tracker.lastActivity = 'replying'
-        this.setAnswerText(tracker.sessionId, tracker.assistant, plainify(tracker.streamed), false)
+        this.setAnswerText(tracker.sessionId, tracker.assistant, this.answerText(tracker.sessionId, tracker.streamed, tracker), false)
         break
       }
       case 'message.interim': {
@@ -1047,7 +1071,7 @@ export class Controller {
     tracker.lastActivity = ''
     const feed = this.feed(tracker.sessionId)
     if (status === 'completed') {
-      const text = plainify(output ?? '')
+      const text = this.answerText(tracker.sessionId, output ?? '', tracker, true)
       if (text) {
         if (!tracker.assistant) {
           tracker.assistant = feed.add('assistant', '')
@@ -1068,10 +1092,72 @@ export class Controller {
       if (job) job.done = true
     }
     this.pendingApprovals.delete(tracker.sessionId)
+    const answer = tracker.assistant
     tracker.assistant = undefined
     this.log(`run ${tracker.runId} ${status}`)
+    if (status === 'completed' && tracker.chart) {
+      this.chartDue.set(tracker.sessionId, tracker.chart)
+      // Typing mode opens it when the reveal ends (typeLoop); otherwise the text is already up.
+      if (!answer || !this.typing.has(answer.id)) void this.openDueChart(tracker.sessionId)
+    }
+    tracker.chart = undefined
     if (this.approval?.tracker === tracker && this.screen === 'approval') void this.closeApproval()
     this.render(tracker.sessionId)
+  }
+
+  // ---- charts ------------------------------------------------------------------------------------
+
+  /**
+   * Answer text for the feed: g2chart blocks become a marker line (a still-streaming block is
+   * hidden) and the chart is remembered for the session and, when given, the run.
+   */
+  private answerText(sessionId: string, raw: string, tracker?: RunTracker, final = false): string {
+    const { text, charts, invalid } = extractCharts(raw)
+    const chart = charts[0]
+    if (chart) {
+      this.lastChart.set(sessionId, chart)
+      if (tracker) tracker.chart = chart
+    }
+    if (final && invalid) this.log(`ignored ${invalid} invalid chart block(s)`)
+    return plainify(text)
+  }
+
+  /** Open a finished answer's chart if the user is still looking at that session and idle. */
+  private async openDueChart(sessionId: string): Promise<void> {
+    const spec = this.chartDue.get(sessionId)
+    if (!spec) return
+    this.chartDue.delete(sessionId)
+    const here = this.screen === 'chat' && this.session?.id === sessionId
+    if (!here || this.mode !== 'idle' || this.pendingApprovals.has(sessionId)) return // still in the menu
+    await this.showChartScreen(spec)
+  }
+
+  private async showChartScreen(spec: ChartSpec): Promise<void> {
+    this.screen = 'chart'
+    this.emit()
+    try {
+      const { tiles, preview } = await renderChart(spec)
+      if (this.screen !== 'chart') return
+      const unit = spec.unit && spec.type !== 'gauge' ? ` (${spec.unit})` : ''
+      await this.glasses.showChart({
+        title: fitLine(spec.title + unit, INNER_W),
+        caption: wrapText(spec.caption, INNER_W).slice(0, 2).join('\n'),
+        status: 'any gesture: back',
+        tiles,
+        preview,
+      })
+    } catch (err) {
+      this.log(`chart failed: ${(err as Error).message}`)
+      if (this.screen !== 'chart') return
+      this.feed().add('error', `chart failed: ${oneLine((err as Error).message, 80)}`)
+      await this.closeChart()
+    }
+  }
+
+  private async closeChart(): Promise<void> {
+    if (this.screen !== 'chart') return
+    if (this.session) await this.enterChat(this.session, false)
+    else await this.showMenu()
   }
 
   // ---- approvals ---------------------------------------------------------------------------------
@@ -1083,7 +1169,9 @@ export class Controller {
     this.pendingApprovals.set(tracker.sessionId, pending)
     this.log(`approval requested on ${tracker.runId}: ${oneLine(event.command, 80)}`)
     const inSession = this.screen === 'chat' && this.session?.id === tracker.sessionId
-    if (inSession && this.mode === 'idle') await this.presentApproval(pending)
+    // A blocked run needs the user: an approval brings a hidden display back.
+    if (this.screen === 'hidden' && this.session?.id === tracker.sessionId) await this.wake()
+    else if (inSession && this.mode === 'idle') await this.presentApproval(pending)
     else if (this.screen === 'menu') await this.showMenu() // refresh header + session markers
     else this.render(tracker.sessionId)
   }
@@ -1161,8 +1249,10 @@ export class Controller {
 
   async handleGesture(g: Gesture): Promise<void> {
     if (g.kind === 'exit') return this.stop()
-    if (g.kind === 'fg_enter' || g.kind === 'fg_exit' || g.kind === 'long' || g.kind === 'long_release') return
+    if (g.kind === 'fg_enter' || g.kind === 'fg_exit' || g.kind === 'long_release') return
     if (g.kind === 'menu') return this.handleMenuItem(g.menuItemId ?? 0)
+    if (this.screen === 'hidden') return this.wake() // any gesture, including another long press
+    if (g.kind === 'long') return this.hide()
     switch (this.screen) {
       case 'boot':
         return
@@ -1176,7 +1266,32 @@ export class Controller {
         return this.handleChatGesture(g)
       case 'approval':
         return this.handleApprovalGesture(g)
+      case 'chart':
+        // Any gesture leaves the chart (a tap must not start listening).
+        return this.closeChart()
     }
+  }
+
+  // ---- hide (long press) ---------------------------------------------------------------------------
+
+  /** Blank the glasses; runs, typing and approvals carry on in the background. */
+  private async hide(): Promise<void> {
+    // Not over a pending decision or while connecting: those need the display.
+    if (this.screen === 'approval' || this.screen === 'boot') return
+    if (this.mode === 'listening') await this.cancelListening()
+    this.hiddenFrom = this.screen
+    this.screen = 'hidden'
+    this.syncSpinner()
+    this.emit()
+    await this.glasses.showBlank()
+  }
+
+  private async wake(): Promise<void> {
+    if (this.screen !== 'hidden') return
+    if (this.hiddenFrom === 'error') return this.start()
+    if (this.hiddenFrom === 'menu' || !this.session) return this.showMenu()
+    // enterChat redraws the latest state and presents a pending approval.
+    return this.enterChat(this.session, false)
   }
 
   private async handleMenuItem(id: number): Promise<void> {
@@ -1199,6 +1314,15 @@ export class Controller {
         return this.newSession()
       case MENU_ITEMS.SESSIONS:
         return this.goToMenu()
+      case MENU_ITEMS.LAST_CHART: {
+        const spec = this.session ? this.lastChart.get(this.session.id) : undefined
+        if (spec && this.mode === 'idle') return this.showChartScreen(spec)
+        if (!spec && this.session) {
+          this.feed().add('system', 'no chart in this session yet')
+          this.render()
+        }
+        return
+      }
       case MENU_ITEMS.RECONNECT: {
         const tracker = this.session ? this.runs.get(this.session.id) : undefined
         if (tracker && !tracker.streaming && !TERMINAL_STATUSES.has(tracker.status)) {

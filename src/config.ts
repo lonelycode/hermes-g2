@@ -37,6 +37,8 @@ export interface Settings {
   toolSteps: ToolSteps
   /** Send the phone's location fix to the agent with each message. */
   shareLocation: OnOff
+  /** Let the agent attach a small chart (g2chart block) to replies. */
+  charts: OnOff
   maxListenSeconds: number
   /** RMS (0..32767) below which a clip counts as silence and is discarded. */
   minAudioRms: number
@@ -63,6 +65,7 @@ export const DEFAULT_SETTINGS: Settings = {
   launchInto: 'new',
   toolSteps: 'collapsed',
   shareLocation: 'on',
+  charts: 'on',
   maxListenSeconds: 60,
   minAudioRms: 200,
 }
@@ -141,6 +144,7 @@ export function normalizeSettings(raw: Partial<Settings> | null | undefined): Se
   if (!['new', 'latest', 'menu'].includes(s.launchInto)) s.launchInto = 'new'
   if (!['collapsed', 'expanded'].includes(s.toolSteps)) s.toolSteps = 'collapsed'
   if (!['on', 'off'].includes(s.shareLocation)) s.shareLocation = 'on'
+  if (!['on', 'off'].includes(s.charts)) s.charts = 'on'
   s.maxListenSeconds = clamp(Number(s.maxListenSeconds) || 60, 5, 300)
   s.minAudioRms = clamp(Number(s.minAudioRms) || 200, 0, 10000)
   return s
