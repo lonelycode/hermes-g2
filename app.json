@@ -2,7 +2,7 @@
   "package_id": "com.lonelycode.hermesg2",
   "edition": "202601",
   "name": "Hermes G2",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "min_sdk_version": "0.0.15",
   "entrypoint": "index.html",
   "permissions": [
