@@ -50,6 +50,12 @@ export function wrapText(text: string, maxWidth: number): string[] {
   return out
 }
 
+/** Rough characters per line of ordinary prose at this width (for telling the agent the display size). */
+export function approxCharsPerLine(width: number): number {
+  const sample = 'The quick brown fox jumps over the lazy dog, then takes a short nap. '
+  return Math.floor(width / (getTextWidth(sample) / sample.length))
+}
+
 /** Truncate to one line of at most `maxWidth` px, appending "..." when cut. */
 export function fitLine(text: string, maxWidth: number): string {
   return pxTruncate(sanitize(text).replace(/\s+/g, ' ').trim(), maxWidth)

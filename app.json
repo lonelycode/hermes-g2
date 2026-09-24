@@ -31,6 +31,10 @@
     {
       "name": "phone-microphone",
       "desc": "Optional: capture your voice from the phone microphone instead of the glasses."
+    },
+    {
+      "name": "location",
+      "desc": "Optional: tells your Hermes agent roughly where you are with each message, so answers about nearby places, weather or directions make sense. Turn it off under \"Share location\" in the phone app."
     }
   ],
   "supported_languages": [

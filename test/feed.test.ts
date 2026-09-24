@@ -64,3 +64,28 @@ test('steps form a tree under the turn and the answer can be anchored to the top
   feed.scrollUp()
   assert.equal(feed.anchored, false)
 })
+
+test('collapsed mode folds a turn\'s tool calls into one working line', () => {
+  const feed = new Feed(568, 9)
+  feed.collapseTools = true
+  feed.add('user', 'question')
+  const a = feed.add('tool', 'terminal: ls', { tool: 'terminal' })
+  feed.add('interim', 'checking the web')
+  feed.add('tool', 'web_search: g2', { tool: 'web_search', done: true })
+  feed.add('tool', 'terminal: cat', { tool: 'terminal', done: true })
+  assert.equal(feed.lines()[1], ' ├ ○ working… · 3 tools: terminal, web_search')
+  assert.equal(feed.lines()[2], ' └ · checking the web')
+  feed.update(a, { done: true })
+  feed.add('tool', 'read_file: x', { tool: 'read_file', done: true, failed: true })
+  feed.add('assistant', 'done')
+  const lines = feed.lines()
+  assert.equal(lines[1], ' ├ ● worked · 3 tools: terminal, web_search')
+  assert.equal(lines[3], ' └ × read_file: x')
+  assert.equal(lines[5], '■ Hermes:')
+  // A new turn starts a new group; expanding restores one line per call.
+  feed.add('user', 'again')
+  feed.add('tool', 'terminal: pwd', { tool: 'terminal' })
+  assert.equal(feed.lines().at(-1), ' └ ○ working… · 1 tool: terminal')
+  feed.collapseTools = false
+  assert.equal(feed.lines().filter(l => l.includes('terminal')).length, 3)
+})

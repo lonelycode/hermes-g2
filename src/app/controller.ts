@@ -2,7 +2,7 @@
 // Owns the Hermes client, per-session feeds, run trackers, microphone capture and the mapping
 // from ring/temple gestures to actions.
 
-import { AudioInputSource, type EvenAppBridge } from '@evenrealities/even_hub_sdk'
+import { AppLocationAccuracy, AudioInputSource, type EvenAppBridge } from '@evenrealities/even_hub_sdk'
 import type { Settings } from '../config.ts'
 import { HermesClient, HermesError } from '../hermes/client.ts'
 import {
@@ -20,9 +20,10 @@ import { startLiveTranscription, type LiveSession } from '../stt/live.ts'
 import { concatChunks, pcmStats } from '../stt/wav.ts'
 import { APPROVAL_BODY_LINES, BODY_LINES, Glasses, INNER_W, MENU_ITEMS, MENU_OBJECT } from '../glasses/display.ts'
 import type { Gesture } from '../glasses/input.ts'
-import { fitLine, oneLine, plainify, wrapText } from '../glasses/text.ts'
+import { approxCharsPerLine, fitLine, oneLine, plainify, wrapText } from '../glasses/text.ts'
 import { Feed, type FeedEntry } from './feed.ts'
 import { looksLikeError, summarizeToolCall, summarizeToolResult } from './summaries.ts'
+import { buildInstructions, type LocationFix } from './context.ts'
 import { cleanUserRow } from './history.ts'
 import { TYPING_CPS, revealWords } from './typewriter.ts'
 
@@ -85,6 +86,10 @@ const WINDOW_LINES = 40
 const WINDOW_CHARS = 1900
 const POLL_MS = 2000
 const POLL_MAX_MS = 6 * 60 * 60 * 1000
+// A location fix younger than this is reused; an older one is refreshed before the next send.
+const LOCATION_FRESH_MS = 5 * 60 * 1000
+// How long a send waits for a location fix before going without one.
+const LOCATION_WAIT_MS = 2500
 
 export class Controller {
   private client: HermesClient
@@ -115,6 +120,11 @@ export class Controller {
   private lastAudio: ControllerSnapshot['lastAudio'] = null
   private stopped = false
   private lastError = ''
+  /** Sessions opened on the glasses but not yet created on the gateway (created on first send). */
+  private unsaved = new Set<string>()
+  private location: LocationFix | null = null
+  private locationAt = 0
+  private locating: Promise<void> | null = null
 
   constructor(private readonly deps: ControllerDeps) {
     this.settings = deps.settings
@@ -162,12 +172,27 @@ export class Controller {
       await this.showError(err)
       return
     }
+    if (this.settings.shareLocation === 'on') void this.refreshLocation()
+    if (this.settings.launchInto === 'new') return this.newSession()
+    if (this.settings.launchInto === 'latest') {
+      try {
+        const latest = (await this.client.listSessions(5)).find(s => !s.archived)
+        if (latest) {
+          this.sessions = [latest]
+          return this.enterChat(latest, false)
+        }
+        return this.newSession()
+      } catch (err) {
+        this.log(`listSessions failed: ${(err as Error).message}`)
+      }
+    }
     await this.showMenu()
   }
 
   async applySettings(settings: Settings): Promise<void> {
     this.settings = settings
     this.client = this.makeClient()
+    if (settings.shareLocation === 'off') this.location = null
     this.log(`settings applied: ${settings.hermesUrl}`)
     if (this.screen === 'error' || this.screen === 'boot') await this.start()
   }
@@ -239,16 +264,83 @@ export class Controller {
     const title = `G2 ${now.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${now
       .toTimeString()
       .slice(0, 5)}`
-    let session: HermesSession
+    // Created on the gateway only once something is sent, so opening the app (or a new
+    // session) without talking leaves no empty sessions behind.
+    const session: HermesSession = { id: `g2_${Date.now().toString(36)}`, title }
+    this.unsaved.add(session.id)
+    this.sessions.unshift(session)
+    await this.enterChat(session, true)
+  }
+
+  /** Create a lazily opened session on the gateway, carrying its feed over to the real id. */
+  private async saveSession(session: HermesSession): Promise<void> {
+    if (!this.unsaved.delete(session.id)) return
+    let created: HermesSession
     try {
-      session = await this.client.createSession(title)
+      created = await this.client.createSession(session.title ?? '')
     } catch (err) {
       // Older gateways may lack POST /api/sessions; /v1/runs auto-creates the session anyway.
       this.log(`createSession failed, using client id: ${(err as Error).message}`)
-      session = { id: `g2_${Date.now().toString(36)}`, title }
+      return
     }
-    this.sessions.unshift(session)
-    await this.enterChat(session, true)
+    const oldId = session.id
+    if (created.id === oldId) return
+    const feed = this.feeds.get(oldId)
+    if (feed) {
+      this.feeds.delete(oldId)
+      this.feeds.set(created.id, feed)
+    }
+    const win = this.winStart.get(oldId)
+    if (win !== undefined) {
+      this.winStart.delete(oldId)
+      this.winStart.set(created.id, win)
+    }
+    // Same object as this.session / this.sessions[i], so every holder sees the new id.
+    Object.assign(session, created)
+  }
+
+  // ---- context for the agent -------------------------------------------------------------------
+
+  /** Ask the phone for a location fix; failures and timeouts just leave the last fix in place. */
+  private refreshLocation(): Promise<void> {
+    if (this.locating) return this.locating
+    this.locating = (async () => {
+      try {
+        // Hosts without location support may never answer; don't let that pin `locating`.
+        const fix = await Promise.race([
+          this.deps.bridge.getAppLocation({ accuracy: AppLocationAccuracy.Medium, timeoutMs: 10000 }),
+          sleep(12000).then(() => null),
+        ])
+        if (fix && Number.isFinite(fix.latitude) && Number.isFinite(fix.longitude)) {
+          // The host may report seconds or milliseconds.
+          const ts = fix.timestamp ? (fix.timestamp < 1e12 ? fix.timestamp * 1000 : fix.timestamp) : Date.now()
+          this.location = { latitude: fix.latitude, longitude: fix.longitude, accuracy: fix.accuracy, timestamp: ts }
+          this.locationAt = Date.now()
+        }
+      } catch (err) {
+        this.log(`location unavailable: ${(err as Error).message}`)
+      } finally {
+        this.locating = null
+      }
+    })()
+    return this.locating
+  }
+
+  private async runInstructions(): Promise<string> {
+    let location: LocationFix | null = null
+    if (this.settings.shareLocation === 'on') {
+      if (!this.location || Date.now() - this.locationAt > LOCATION_FRESH_MS) {
+        await Promise.race([this.refreshLocation(), sleep(LOCATION_WAIT_MS)])
+      }
+      location = this.location
+    }
+    let timeZone: string | undefined
+    try {
+      timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    } catch {
+      /* device offset only */
+    }
+    return buildInstructions({ now: new Date(), timeZone, lines: BODY_LINES, charsPerLine: approxCharsPerLine(INNER_W), location })
   }
 
   private async openSession(index: number): Promise<void> {
@@ -266,6 +358,7 @@ export class Controller {
       this.feeds.set(sessionId, f)
     }
     f.step = this.settings.scrollStep === 'half' ? Math.ceil(BODY_LINES / 2) : BODY_LINES - 1
+    f.collapseTools = this.settings.toolSteps === 'collapsed'
     return f
   }
 
@@ -745,6 +838,7 @@ export class Controller {
   private async submit(text: string, entry?: FeedEntry): Promise<void> {
     if (!this.session) return
     this.mode = 'sending'
+    await this.saveSession(this.session)
     const sessionId = this.session.id
     const feed = this.feed(sessionId)
     if (entry) feed.update(entry, { text })
@@ -765,7 +859,7 @@ export class Controller {
       }
     }
     try {
-      const { run_id } = await this.client.createRun(text, sessionId)
+      const { run_id } = await this.client.createRun(text, sessionId, await this.runInstructions())
       const tracker: RunTracker = {
         runId: run_id,
         sessionId,

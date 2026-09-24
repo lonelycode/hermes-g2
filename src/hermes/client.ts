@@ -131,8 +131,11 @@ export class HermesClient {
 
   // ---- runs ----------------------------------------------------------------------------------
 
-  createRun(input: string, sessionId: string): Promise<{ run_id: string; status: string }> {
-    return this.request('POST', '/v1/runs', { input, session_id: sessionId, stream: false })
+  /** `instructions` is applied as an ephemeral system prompt for this run (not persisted). */
+  createRun(input: string, sessionId: string, instructions?: string): Promise<{ run_id: string; status: string }> {
+    const body: Record<string, unknown> = { input, session_id: sessionId, stream: false }
+    if (instructions) body.instructions = instructions
+    return this.request('POST', '/v1/runs', body)
   }
 
   getRun(runId: string): Promise<RunStatus> {

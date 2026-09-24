@@ -33,7 +33,7 @@ Voice front end for your self-hosted Hermes Agent: talk, watch every step, appro
 
 ## Category / keywords
 
-Productivity · assistant · agent · voice · Hermes · self-hosted
+Productivity, assistant, agent,voice, Hermes, self-hosted
 
 ## Permissions (what to enter in the review form)
 

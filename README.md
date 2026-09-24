@@ -38,6 +38,12 @@ Answers are revealed at a steady **typing speed** (slowest ≈ 6, slow ≈ 11, n
 
 Turns are labelled (`▶ You:` / `■ Hermes:`) and flush-left; everything that happens in between (tool steps `○/●/×` running / done / failed, `·` commentary or system notes, `»` subagents, `?` approvals) hangs off the turn as a tree (`├` / `└`, continuation lines under `│`). When an answer starts, the page is anchored so its `■ Hermes:` line is the first thing on screen, and it stays there while the answer streams in; swipe to read on, which releases the anchor. The status bar animates (`●○○ → ○●○ → ○○●`) whenever something is in flight and names the state: connecting, thinking, the running tool, working (polling), waiting for approval, transcribing, sending. Only glyphs present in the G2 firmware font are used (see `scripts/check-glyphs.mjs`).
 
+By default (**Tool calls**: `collapsed`) a turn's tool calls fold into a single `○ working… · 3 tools: terminal, web_search` step that turns into `● worked · …` when they finish; failed calls stay on their own `×` line, and the status bar still names the tool that is running. Set it to `expanded` for one line per call.
+
+On launch the app drops straight into a fresh session (**On launch**: `new`); `latest` reopens the most recent session and `menu` shows the session list. A new session is only created on the gateway when you send the first message, so opening the app without talking leaves nothing behind.
+
+Every run carries short context as the run's `instructions` (Hermes applies it as an ephemeral system prompt; it is not stored in the session): that the user is on G2 glasses with a 9-line × ~60-character plain-text display and speech-to-text input, the local date, time and zone, and — with **Share location** on (default) — the phone's location fix (requires the `location` permission).
+
 Tool events carry raw JSON previews; the feed reduces each call to the tool name plus its one meaningful argument (command, query, path, url …) and hides results unless the call failed. The **Transcript detail** setting switches to `verbose` (argument and result previews, reasoning summaries) when you want more.
 
 Approvals use every choice the gateway offers (`once`, `session`, `always`, `deny`; fewer when the gateway flags a command as risky). If the live stream drops, the app falls back to polling `GET /v1/runs/{id}` and still surfaces pending approvals from the run status.

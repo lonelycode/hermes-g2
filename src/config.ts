@@ -13,6 +13,11 @@ export type ScrollMode = 'page' | 'smooth'
 export type PageTransition = 'fade' | 'none'
 /** Paced reveal of answers: off = show deltas as they arrive. */
 export type TypingSpeed = 'off' | 'slowest' | 'slow' | 'normal' | 'fast'
+/** Where the app lands after connecting: a fresh session, the most recent one, or the session list. */
+export type LaunchInto = 'new' | 'latest' | 'menu'
+/** collapsed: a turn's tool calls fold into one "working…" line (failures stay visible). */
+export type ToolSteps = 'collapsed' | 'expanded'
+export type OnOff = 'on' | 'off'
 
 export interface Settings {
   hermesUrl: string
@@ -28,6 +33,10 @@ export interface Settings {
   scrollMode: ScrollMode
   pageTransition: PageTransition
   typingSpeed: TypingSpeed
+  launchInto: LaunchInto
+  toolSteps: ToolSteps
+  /** Send the phone's location fix to the agent with each message. */
+  shareLocation: OnOff
   maxListenSeconds: number
   /** RMS (0..32767) below which a clip counts as silence and is discarded. */
   minAudioRms: number
@@ -51,6 +60,9 @@ export const DEFAULT_SETTINGS: Settings = {
   scrollMode: 'page',
   pageTransition: 'fade',
   typingSpeed: 'normal',
+  launchInto: 'new',
+  toolSteps: 'collapsed',
+  shareLocation: 'on',
   maxListenSeconds: 60,
   minAudioRms: 200,
 }
@@ -126,6 +138,9 @@ export function normalizeSettings(raw: Partial<Settings> | null | undefined): Se
   if (!['page', 'smooth'].includes(s.scrollMode)) s.scrollMode = 'page'
   if (!['fade', 'none'].includes(s.pageTransition)) s.pageTransition = 'fade'
   if (!['off', 'slowest', 'slow', 'normal', 'fast'].includes(s.typingSpeed)) s.typingSpeed = 'normal'
+  if (!['new', 'latest', 'menu'].includes(s.launchInto)) s.launchInto = 'new'
+  if (!['collapsed', 'expanded'].includes(s.toolSteps)) s.toolSteps = 'collapsed'
+  if (!['on', 'off'].includes(s.shareLocation)) s.shareLocation = 'on'
   s.maxListenSeconds = clamp(Number(s.maxListenSeconds) || 60, 5, 300)
   s.minAudioRms = clamp(Number(s.minAudioRms) || 200, 0, 10000)
   return s

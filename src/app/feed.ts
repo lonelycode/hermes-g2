@@ -2,7 +2,7 @@
 // notes) rendered into wrapped lines and paged for the glasses. Lines are wrapped lazily so a
 // burst of streaming deltas only costs one re-wrap per render.
 
-import { wrapText } from '../glasses/text.ts'
+import { fitLine, wrapText } from '../glasses/text.ts'
 
 export type EntryKind =
   | 'user'
@@ -49,6 +49,12 @@ export const STEP_CONT_LAST = '   '
 const STEP_INDENT_PX = 40
 const TURN_KINDS: ReadonlySet<EntryKind> = new Set(['user', 'assistant'])
 
+/** One rendered block: an entry, or (collapsed mode) a turn's tool calls folded into one line. */
+interface Row {
+  entry: FeedEntry
+  group?: FeedEntry[]
+}
+
 export interface FeedPosition {
   page: number
   pages: number
@@ -61,7 +67,9 @@ export class Feed {
   private nextId = 1
   private cache = new Map<number, string[]>()
   private flat: string[] | null = null
+  private anchorIndex: number | null = null
   private offset = 0
+  private collapse = false
   follow = true
   /** Entry pinned to the top of the page (the latest answer) until the user scrolls. */
   private anchor: FeedEntry | null = null
@@ -143,15 +151,44 @@ export class Feed {
   /** Line index where the anchored entry starts, or null. */
   anchorLine(): number | null {
     if (!this.anchor) return null
-    let idx = 0
-    for (let i = 0; i < this.entries.length; i++) {
-      const e = this.entries[i]
-      const next = this.entries[i + 1]
-      const n = this.linesFor(e, i === 0, !next || TURN_KINDS.has(next.kind)).length
-      if (e === this.anchor) return idx + (i === 0 ? 0 : 1)
-      idx += n
+    this.lines()
+    return this.anchorIndex
+  }
+
+  /** Fold each turn's tool calls into a single "working…" line (failed calls stay separate). */
+  set collapseTools(on: boolean) {
+    if (on === this.collapse) return
+    this.collapse = on
+    this.flat = null
+  }
+
+  get collapseTools(): boolean {
+    return this.collapse
+  }
+
+  private rows(): Row[] {
+    if (!this.collapse) return this.entries.map(entry => ({ entry }))
+    const out: Row[] = []
+    let group: FeedEntry[] | null = null
+    for (const e of this.entries) {
+      if (TURN_KINDS.has(e.kind)) group = null
+      else if (e.kind === 'tool' && !e.failed) {
+        if (group) group.push(e)
+        else out.push({ entry: e, group: (group = [e]) })
+        continue
+      }
+      out.push({ entry: e })
     }
-    return null
+    return out
+  }
+
+  /** The summary line for a folded group of tool calls. */
+  private groupLines(group: FeedEntry[]): string[] {
+    const running = group.some(e => !e.done)
+    const names = [...new Set(group.map(e => e.tool || e.text.split(/[\s:]/)[0] || 'tool'))]
+    const n = group.length
+    const head = running ? `${PREFIX.tool}working…` : `${PREFIX_TOOL_DONE}worked`
+    return [fitLine(`${head} · ${n} tool${n === 1 ? '' : 's'}: ${names.join(', ')}`, this.width - STEP_INDENT_PX)]
   }
 
   /**
@@ -192,8 +229,9 @@ export class Feed {
     return lines
   }
 
-  private linesFor(entry: FeedEntry, first: boolean, lastStep: boolean): string[] {
-    const body = this.bodyLines(entry)
+  private linesFor(row: Row, first: boolean, lastStep: boolean): string[] {
+    const { entry } = row
+    const body = row.group ? this.groupLines(row.group) : this.bodyLines(entry)
     if (TURN_KINDS.has(entry.kind)) {
       // A blank separator ahead of each turn keeps turns visually distinct.
       return first ? body : ['', ...body]
@@ -205,17 +243,18 @@ export class Feed {
   lines(): string[] {
     if (this.flat) return this.flat
     const out: string[] = []
-    let anchorIndex = -1
-    this.entries.forEach((e, i) => {
-      const next = this.entries[i + 1]
-      const lastStep = !next || TURN_KINDS.has(next.kind)
-      if (e === this.anchor) anchorIndex = out.length + (i === 0 ? 0 : 1) // skip the separator line
-      out.push(...this.linesFor(e, i === 0, lastStep))
+    const rows = this.rows()
+    this.anchorIndex = null
+    rows.forEach((r, i) => {
+      const next = rows[i + 1]
+      const lastStep = !next || TURN_KINDS.has(next.entry.kind)
+      if (r.entry === this.anchor) this.anchorIndex = out.length + (i === 0 ? 0 : 1) // skip the separator line
+      out.push(...this.linesFor(r, i === 0, lastStep))
     })
     this.flat = out
     // Anchored: the answer starts at the top of the page until it overflows, then the page
     // follows its last line (so a paced reveal scrolls line by line).
-    if (this.anchor && anchorIndex >= 0) this.offset = Math.max(anchorIndex, this.maxOffset())
+    if (this.anchor && this.anchorIndex !== null) this.offset = Math.max(this.anchorIndex, this.maxOffset())
     else if (this.follow) this.offset = this.maxOffset()
     else this.offset = Math.min(this.offset, this.maxOffset())
     return out
